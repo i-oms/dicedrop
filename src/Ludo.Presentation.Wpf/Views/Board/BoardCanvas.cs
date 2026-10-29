@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Ludo.Application.Session;
 
 namespace Ludo.Presentation.Wpf.Views.Board;
@@ -26,10 +27,12 @@ public sealed class BoardCanvas : FrameworkElement
     /// <summary>A pawn stands this far below its square's centre, so it looks centred on the square.</summary>
     private const double FootOffset = 0.3;
 
-    private const double PawnSize = 1.05;
+    /// <summary>Scale of a wizard in cells; it stands about <see cref="PawnPainter.Height"/> times this tall.</summary>
+    private const double PawnSize = 1.0;
 
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly TokenAnimator _animator = new();
+    private readonly WizardPoses _poses = new();
     private readonly List<(Point Center, double Radius, int Token)> _targets = [];
     private BoardGeometry? _geometry;
     private Drawing? _board;
@@ -151,7 +154,8 @@ public sealed class BoardCanvas : FrameworkElement
             {
                 var pose = _animator.Pose(new TokenKey(seat.Seat, token.Index), p => geometry.PathPoint(seat, token.Index, p), now);
                 var finished = !pose.IsMoving && token.Location == TokenLocation.Finished;
-                pawns.Add(new Pawn(seat.Arm, token.Index, pose, finished ? 0.62 : 1, token.CanMove && canClick));
+                var sprite = _poses.Pick(new TokenKey(seat.Seat, token.Index), PawnPainter.PieceOf(token.Index), seat.Arm, pose.IsMoving, now);
+                pawns.Add(new Pawn(seat.Arm, token.Index, pose, finished ? 0.62 : 1, token.CanMove && canClick) { Sprite = sprite });
             }
         }
 
@@ -185,7 +189,61 @@ public sealed class BoardCanvas : FrameworkElement
                 _targets.Add((foot - new Vector(0, size * PawnPainter.Height * 0.55), size * 0.55, pawn.Token));
             }
 
-            PawnPainter.Draw(dc, foot, size, pawn.Arm, lift, pawn.Pose.Squash);
+            var pose = pawn.Pose;
+            pawn.Head = foot - new Vector(0, size * 0.6);
+            pawn.Size = size;
+
+            // A struck wizard is hit by the element of the spell that caught it; with no caster, its own colour.
+            var element = SpellEffects.ElementOf(pose.SpellArm >= 0 ? pose.SpellArm : pawn.Arm);
+            if (pose.Burst >= 0)
+            {
+                var impact = SpellEffects.Impact(element, pose.Burst);
+                SpellEffects.DrawImpact(dc, element, foot, size, pose.Burst);
+                var alpha = Math.Min(pose.Alpha, impact.Alpha);
+                if (alpha > 0)
+                {
+                    PawnPainter.Draw(dc, foot + new Vector(impact.Drift * cell, 0), size, pawn.Sprite, lift - (impact.Sink * cell), pose.Squash + impact.Squash, pose.Tilt + impact.Tilt, alpha, impact.Pinch);
+                }
+
+                SpellEffects.DrawImpactFront(dc, element, foot, size, pose.Burst);
+            }
+            else if (pose.Alpha > 0)
+            {
+                // A wizard hidden away after its spell is not drawn at all; only the aftermath remains.
+                PawnPainter.Draw(dc, foot, size, pawn.Sprite, lift, pose.Squash, pose.Tilt, pose.Alpha);
+            }
+
+            if (pose.Aftermath >= 0)
+            {
+                SpellEffects.DrawAftermath(dc, element, foot, size, pose.Aftermath);
+            }
+
+            if (pose.Pop >= 0)
+            {
+                PawnPainter.DrawPop(dc, foot, size, pawn.Arm, pose.Pop);
+            }
+        }
+
+        DrawSpellBalls(dc, pawns);
+    }
+
+    /// <summary>The charge a wizard gathers in its hand, and the spell that flies from it to the wizard it strikes.</summary>
+    private static void DrawSpellBalls(DrawingContext dc, List<Pawn> pawns)
+    {
+        var target = pawns.FirstOrDefault(p => p.Pose.Incoming >= 0);
+        foreach (var caster in pawns)
+        {
+            var element = SpellEffects.ElementOf(caster.Arm);
+            var hand = caster.Head + new Vector(caster.Size * 0.32, caster.Size * 0.12);
+            if (caster.Pose.Cast >= 0)
+            {
+                SpellEffects.DrawCharge(dc, element, hand, caster.Size, caster.Pose.Cast);
+            }
+
+            if (caster.Pose.Blast >= 0 && target is not null)
+            {
+                SpellEffects.DrawProjectile(dc, element, hand, target.Head, caster.Size, caster.Pose.Blast);
+            }
         }
     }
 
@@ -245,6 +303,8 @@ public sealed class BoardCanvas : FrameworkElement
 
     private sealed class Pawn(int arm, int token, TokenPose pose, double scale, bool canMove)
     {
+        public required BitmapSource Sprite { get; init; }
+
         public int Arm { get; } = arm;
 
         public int Token { get; } = token;
@@ -256,5 +316,10 @@ public sealed class BoardCanvas : FrameworkElement
         public bool CanMove { get; } = canMove;
 
         public Vector Offset { get; set; }
+
+        /// <summary>Where the wizard's head is drawn this frame, for spell effects that fly between wizards.</summary>
+        public Point Head { get; set; }
+
+        public double Size { get; set; }
     }
 }

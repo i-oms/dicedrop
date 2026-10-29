@@ -5,23 +5,46 @@ namespace Ludo.Presentation.Wpf.Views.Board;
 
 internal readonly record struct TokenKey(int Seat, int Token);
 
-/// <summary>Where to draw a pawn this frame.</summary>
+/// <summary>Where to draw a pawn this frame, and any spell effects on it.</summary>
 /// <param name="Point">Centre of the square the pawn is over.</param>
 /// <param name="Lift">Height above the board, in cells.</param>
 /// <param name="Squash">0 at rest, 1 fully squashed.</param>
-internal readonly record struct TokenPose(Point Point, double Lift, double Squash, bool IsMoving);
+/// <param name="Tilt">Toppling angle in radians, for a wizard knocked over by a spell.</param>
+/// <param name="Alpha">Opacity; 0 while a struck wizard is hidden away.</param>
+/// <param name="Burst">0 to 1 while the spell's impact strikes this wizard, otherwise -1.</param>
+/// <param name="SpellArm">Seat colour of the wizard that cast the spell (its element), or -1 for none.</param>
+/// <param name="Aftermath">0 to 1 while the spell's aftermath plays on this wizard's square, otherwise -1.</param>
+/// <param name="Cast">0 to 1 while this wizard charges its spell, otherwise -1.</param>
+/// <param name="Blast">0 to 1 while this wizard's spell flies out, otherwise -1.</param>
+/// <param name="Incoming">0 to 1 while a spell is flying at this wizard, otherwise -1.</param>
+/// <param name="Pop">0 to 1 while a ring marks this wizard reappearing in its yard, otherwise -1.</param>
+internal readonly record struct TokenPose(
+    Point Point,
+    double Lift,
+    double Squash,
+    bool IsMoving,
+    double Tilt = 0,
+    double Alpha = 1,
+    double Burst = -1,
+    int SpellArm = -1,
+    double Aftermath = -1,
+    double Cast = -1,
+    double Blast = -1,
+    double Incoming = -1,
+    double Pop = -1);
 
 /// <summary>
 /// Turns board snapshots into motion. When a token's progress grows it hops square by square, as when
-/// counting out a move by hand; when it drops back to the yard (a capture) it slides home along its path,
-/// after the capturing pawn has landed. Motions play one after another, in the order they happened.
+/// counting out a move by hand. A capture plays as one spell in the capturing wizard's element: it charges,
+/// the spell flies at the victim, the element's impact strikes, its aftermath lingers, and the victim
+/// reappears in its yard. Each element sets how long its spell takes. Motions play one after another, in the
+/// order they happened.
 /// </summary>
 internal sealed class TokenAnimator
 {
     private const double HopSeconds = 0.17;
     private const double EntrySeconds = 0.32;
     private const double SettleSeconds = 0.12;
-    private const double SlideStepSeconds = 0.035;
     private const double HopHeight = 0.55;
     private const double EntryHeight = 1.1;
 
@@ -63,15 +86,23 @@ internal sealed class TokenAnimator
                 var key = new TokenKey(seat.Seat, token.Index);
                 if (_known.TryGetValue(key, out var old) && old != token.Progress && seat.Standing != SeatStanding.Left)
                 {
-                    (token.Progress > old ? forward : back).Add(new Motion(key, old, token.Progress));
+                    (token.Progress > old ? forward : back).Add(new Motion(key, old, token.Progress) { Arm = seat.Arm });
                 }
 
                 _known[key] = token.Progress;
             }
         }
 
-        // The capturing pawn lands first, then its victims slide home.
-        foreach (var motion in forward.Concat(back))
+        // Each spell resolves before its caster steps onto the square, so the victim is gone first.
+        var caster = forward.FirstOrDefault();
+        foreach (var victim in back)
+        {
+            victim.Caster = caster?.Key;
+            victim.CasterArm = caster?.Arm ?? -1;
+            victim.CasterFrom = caster?.From ?? -1;
+        }
+
+        foreach (var motion in back.Concat(forward))
         {
             _queue.Enqueue(motion);
         }
@@ -121,7 +152,26 @@ internal sealed class TokenAnimator
     {
         if (_current is { } motion && motion.Key == key)
         {
-            return motion.IsCapture ? Slide(motion, path, now - _currentStart) : Hop(motion, path, now - _currentStart);
+            return motion.IsCapture ? Spell(motion, path, now - _currentStart) : Hop(motion, path, now - _currentStart);
+        }
+
+        // The wizard whose spell is in progress charges it, then casts it.
+        if (_current is { IsCapture: true } spell && spell.Caster == key)
+        {
+            var timing = SpellEffects.TimingOf(SpellEffects.ElementOf(spell.CasterArm));
+            var progress = Math.Clamp((now - _currentStart) / Duration(spell), 0, 1);
+            var square = path(spell.CasterFrom);
+            if (progress < timing.ChargeEnd)
+            {
+                return new TokenPose(square, 0, 0, false, Cast: progress / timing.ChargeEnd);
+            }
+
+            if (progress < timing.FlightEnd)
+            {
+                return new TokenPose(square, 0, 0, false, Blast: (progress - timing.ChargeEnd) / (timing.FlightEnd - timing.ChargeEnd));
+            }
+
+            return new TokenPose(square, 0, 0, false);
         }
 
         // Waiting for its turn to move: stay where the queued motion starts.
@@ -137,7 +187,7 @@ internal sealed class TokenAnimator
     }
 
     private static double Duration(Motion motion) => motion.IsCapture
-        ? Math.Clamp((motion.From + 2) * SlideStepSeconds, 0.35, 0.9) / motion.Speed
+        ? SpellEffects.TimingOf(SpellEffects.ElementOf(motion.CasterArm)).Seconds / motion.Speed
         : ((motion.From < 0 ? EntrySeconds : HopSeconds * (motion.To - motion.From)) + SettleSeconds) / motion.Speed;
 
     private static TokenPose Hop(Motion motion, Func<int, Point> path, double elapsed)
@@ -163,16 +213,36 @@ internal sealed class TokenAnimator
         return new TokenPose(Lerp(path(from), path(to), Ease(t)), Math.Sin(Math.PI * t) * height, squash, true);
     }
 
-    private static TokenPose Slide(Motion motion, Func<int, Point> path, double elapsed)
+    /// <summary>
+    /// A captured wizard's spell, in four stages: the spell flies at it, its element's impact strikes it, the
+    /// aftermath lingers over its square while it is out of sight, then it reappears standing in its yard.
+    /// </summary>
+    private static TokenPose Spell(Motion motion, Func<int, Point> path, double elapsed)
     {
-        // Back along the track to the start square, then one hop into the yard.
-        var segments = motion.From + 1;
-        var progress = Math.Clamp(elapsed / Duration(motion), 0, 1) * segments;
-        var index = Math.Min((int)progress, segments - 1);
-        var t = progress - index;
-        var from = motion.From - index;
-        var lift = from == 0 ? Math.Sin(Math.PI * t) * HopHeight : 0.12;
-        return new TokenPose(Lerp(path(from), path(from - 1), t), lift, 0, true);
+        var timing = SpellEffects.TimingOf(SpellEffects.ElementOf(motion.CasterArm));
+        var progress = Math.Clamp(elapsed / Duration(motion), 0, 1);
+        var square = path(motion.From);
+
+        if (progress < timing.FlightEnd)
+        {
+            var incoming = progress < timing.ChargeEnd ? -1 : (progress - timing.ChargeEnd) / (timing.FlightEnd - timing.ChargeEnd);
+            return new TokenPose(square, 0, 0, false, Incoming: incoming);
+        }
+
+        if (progress < timing.ImpactEnd)
+        {
+            var impact = (progress - timing.FlightEnd) / (timing.ImpactEnd - timing.FlightEnd);
+            return new TokenPose(square, 0, 0, false, Burst: impact, SpellArm: motion.CasterArm);
+        }
+
+        if (progress < timing.AftermathEnd)
+        {
+            var aftermath = (progress - timing.ImpactEnd) / (timing.AftermathEnd - timing.ImpactEnd);
+            return new TokenPose(square, 0, 0, false, Alpha: 0, Aftermath: aftermath, SpellArm: motion.CasterArm);
+        }
+
+        var reset = (progress - timing.AftermathEnd) / (1 - timing.AftermathEnd);
+        return new TokenPose(path(-1), 0, 0, false, Alpha: Ease(reset), Pop: reset);
     }
 
     private static double Ease(double t) => t * t * (3 - (2 * t));
@@ -184,5 +254,17 @@ internal sealed class TokenAnimator
         public bool IsCapture => To < From;
 
         public double Speed { get; set; } = 1;
+
+        /// <summary>The seat colour this wizard plays in.</summary>
+        public int Arm { get; init; }
+
+        /// <summary>For a capture: the wizard whose spell struck this one, if it had just landed.</summary>
+        public TokenKey? Caster { get; set; }
+
+        /// <summary>The caster's seat colour (its element), or -1 when there is no caster.</summary>
+        public int CasterArm { get; set; } = -1;
+
+        /// <summary>The caster's progress before its move, where it stands while the spell is cast.</summary>
+        public int CasterFrom { get; set; } = -1;
     }
 }

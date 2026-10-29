@@ -32,6 +32,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="Assets\Wizards\*.png" />
+    <Resource Include="Assets\Spells\*.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Ludo.Application\Ludo.Application.csproj" />
     <ProjectReference Include="..\Ludo.Infrastructure\Ludo.Infrastructure.csproj" />
   </ItemGroup>

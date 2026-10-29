@@ -1,51 +1,74 @@
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace Ludo.Presentation.Wpf.Views.Board;
 
+/// <summary>The four wizards each player fields: token 0 is the King, 1 the Queen, 2 the Bishop, 3 the Knight.</summary>
+internal enum Piece
+{
+    King,
+    Queen,
+    Bishop,
+    Knight,
+}
+
 /// <summary>
-/// Draws the classic map-pin pawn: a glossy head tapering to a point that stands on the square, with a
-/// soft shadow on the board that shrinks as the pawn jumps. Shapes are built once at unit size and scaled.
+/// Draws each pawn as a wizard from the sprite sheet, in the seat's colour, with a shadow on the board that
+/// shrinks as the wizard jumps. Spell effects live in <see cref="SpellEffects"/>.
 /// </summary>
 internal static class PawnPainter
 {
-    private const double HeadY = -0.5;
-    private const double HeadRadius = 0.28;
+    /// <summary>How tall a wizard stands, in multiples of its size, for hit testing and stacking.</summary>
+    public const double Height = 1;
 
-    private static readonly Geometry Body = BuildBody();
-    private static readonly Brush ShadowBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x55, 0, 0, 0)));
-    private static readonly Brush GlossBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x9C, 0xFF, 0xFF, 0xFF)));
+    private static readonly Brush ShadowBrush = Frozen(new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0)));
     private static readonly Pen HighlightPen = Frozen(new Pen(Brushes.White, 0.07));
 
-    /// <summary>Height of the pawn relative to its size, for hit testing and stacking.</summary>
-    public const double Height = 0.8;
+    /// <summary>Which role a token plays. Tokens 0 to 3 are the King, Queen, Bishop and Knight.</summary>
+    public static Piece PieceOf(int token) => (Piece)(token % 4);
 
-    /// <param name="foot">Where the pawn's point touches the board.</param>
-    /// <param name="size">Pawn size in DIPs; it stands about 0.8 × size tall.</param>
+    /// <param name="foot">Where the wizard's feet touch the board.</param>
+    /// <param name="size">Wizard size in DIPs; it stands <see cref="Height"/> × size tall.</param>
     /// <param name="lift">How far above the board it is, in DIPs.</param>
     /// <param name="squash">0 at rest, 1 fully squashed on landing.</param>
-    public static void Draw(DrawingContext dc, Point foot, double size, int arm, double lift, double squash)
+    /// <param name="tilt">Rotation about the feet in radians; negative topples the wizard to the left.</param>
+    /// <param name="alpha">1 when fully visible; lower while a struck wizard fades out.</param>
+    /// <param name="pinch">0 at rest; towards 1 the wizard is squeezed narrower, as by vines.</param>
+    public static void Draw(DrawingContext dc, Point foot, double size, BitmapSource sprite, double lift, double squash, double tilt, double alpha, double pinch = 0)
     {
         var airborne = Math.Clamp(lift / size, 0, 1);
         var shadow = (1 - (airborne * 0.55)) * (1 + (squash * 0.15));
-        dc.PushOpacity(1 - (airborne * 0.5));
-        dc.DrawEllipse(ShadowBrush, null, foot, size * 0.24 * shadow, size * 0.085 * shadow);
-        dc.Pop();
+        if (alpha >= 1)
+        {
+            dc.PushOpacity(1 - (airborne * 0.5));
+            dc.DrawEllipse(ShadowBrush, null, foot, size * 0.3 * shadow, size * 0.1 * shadow);
+            dc.Pop();
+        }
 
+        // Rotate in unit space first so the wizard topples around its feet, then squash and place it.
+        var aspect = sprite.PixelWidth / (double)sprite.PixelHeight;
         var transform = Matrix.Identity;
-        transform.Scale(size * (1 + (0.14 * squash)), size * (1 - (0.2 * squash)));
+        transform.Rotate(tilt * 180 / Math.PI);
+        transform.Scale(size * (1 + (0.14 * squash)) * (1 - (0.45 * pinch)), size * (1 - (0.2 * squash)));
         transform.Translate(foot.X, foot.Y - lift);
         dc.PushTransform(new MatrixTransform(transform));
-
-        var head = new Point(0, HeadY);
-        dc.DrawGeometry(SeatPalette.PawnBrush(arm), SeatPalette.OutlinePen(arm), Body);
-        dc.DrawEllipse(Brushes.White, null, head, 0.165, 0.165);
-        dc.DrawEllipse(SeatPalette.Brush(arm), SeatPalette.OutlinePen(arm), head, 0.1, 0.1);
-        dc.DrawEllipse(GlossBrush, null, new Point(-0.1, HeadY - 0.13), 0.075, 0.045);
+        dc.PushOpacity(alpha);
+        dc.DrawImage(sprite, new Rect(-aspect / 2, -Height, aspect, Height));
+        dc.Pop();
         dc.Pop();
     }
 
-    /// <summary>The pulsing ring under a pawn you can move.</summary>
+    /// <summary>A ring of the wizard's colour that marks it reappearing in its yard, growing over <paramref name="t"/> (0 to 1).</summary>
+    public static void DrawPop(DrawingContext dc, Point at, double size, int arm, double t)
+    {
+        var radius = size * (0.2 + (0.6 * t));
+        dc.PushOpacity(1 - t);
+        dc.DrawEllipse(null, new Pen(SeatPalette.Brush(arm), size * 0.07), at, radius, radius * 0.4);
+        dc.Pop();
+    }
+
+    /// <summary>The pulsing ring under a wizard you can move.</summary>
     public static void DrawMoveRing(DrawingContext dc, Point foot, double size, double pulse)
     {
         var transform = Matrix.Identity;
@@ -57,26 +80,6 @@ internal static class PawnPainter
         dc.DrawEllipse(null, HighlightPen, new Point(0, 0), 0.4, 0.4);
         dc.Pop();
         dc.Pop();
-    }
-
-    private static Geometry BuildBody()
-    {
-        // A circle for the head with two tangents down to the point at (0, 0).
-        var distance = -HeadY;
-        var angle = Math.Acos(HeadRadius / distance);
-        var left = new Point(-HeadRadius * Math.Sin(angle), HeadY + (HeadRadius * Math.Cos(angle)));
-        var right = new Point(HeadRadius * Math.Sin(angle), left.Y);
-
-        var geometry = new StreamGeometry();
-        using (var ctx = geometry.Open())
-        {
-            ctx.BeginFigure(new Point(0, 0), isFilled: true, isClosed: true);
-            ctx.LineTo(left, isStroked: true, isSmoothJoin: true);
-            ctx.ArcTo(right, new Size(HeadRadius, HeadRadius), 0, isLargeArc: true, SweepDirection.Clockwise, isStroked: true, isSmoothJoin: true);
-        }
-
-        geometry.Freeze();
-        return geometry;
     }
 
     private static T Frozen<T>(T freezable)
