@@ -418,7 +418,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
     }
 
     /// <summary>The host has no say in a game: if it really goes away, the lost link hands the lobby over and play goes on.</summary>
-    private bool IsSeatedInRunningGame => context.Match is { Phase: MatchPhase.Playing, IsPlaying: true };
+    private bool IsSeatedInRunningGame => context.SeatedMatch is not null;
 
     private PlayerId RequirePeer(string key) =>
         SessionContext.FindByKey(key) is { } id && id != context.LocalId

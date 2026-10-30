@@ -234,7 +234,7 @@ public sealed class AutoLobbyUseCase : IDisposable
         }
 
         // Never break up a lobby while a game is being set up or played in it.
-        if (_context.Match is { IsActive: true })
+        if (_context.Matches.Exists(m => m.IsActive))
         {
             return;
         }

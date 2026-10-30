@@ -32,7 +32,7 @@ internal sealed class GameplayProtocol(SessionContext context)
         }
 
         var rollIndex = game.RollCount + 1;
-        context.SendToPlayers(new RollRequestMessage(match.Id, rollIndex, context.ComputeDigest()));
+        context.SendToPlayers(match, new RollRequestMessage(match.Id, rollIndex, context.ComputeDigest(match)));
         OpenRound(match, rollIndex, context.LocalId);
     }
 
@@ -53,9 +53,9 @@ internal sealed class GameplayProtocol(SessionContext context)
             throw new SessionException(ex.Message);
         }
 
-        context.SendToPlayers(new MoveMessage(match.Id, game.RollCount, tokenIndex));
-        context.RecordStep(new MatchStep(MatchStepKind.Move, context.LocalId, tokenIndex));
-        context.FlushGameEvents();
+        context.SendToPlayers(match, new MoveMessage(match.Id, game.RollCount, tokenIndex));
+        context.RecordStep(match, new MatchStep(MatchStepKind.Move, context.LocalId, tokenIndex));
+        context.FlushGameEvents(match);
     }
 
     public DispatchResult OnRollRequest(PlayerId from, RollRequestMessage request)
@@ -79,13 +79,13 @@ internal sealed class GameplayProtocol(SessionContext context)
 
         if (game.CurrentPlayer.Id != from)
         {
-            context.AddLog($"Ignored an out-of-turn roll from {context.NameOf(from)}.");
+            match.AddLog($"Ignored an out-of-turn roll from {context.NameOf(from)}.");
             return DispatchResult.Ignored;
         }
 
-        if (request.StateDigest != context.ComputeDigest())
+        if (request.StateDigest != context.ComputeDigest(match))
         {
-            context.AddLog($"Warning: board state differs from {context.NameOf(from)}'s.");
+            match.AddLog($"Warning: board state differs from {context.NameOf(from)}'s.");
         }
 
         OpenRound(match, request.RollIndex, from);
@@ -113,7 +113,7 @@ internal sealed class GameplayProtocol(SessionContext context)
 
     public DispatchResult OnMove(PlayerId from, MoveMessage move)
     {
-        if (Gate(move.MatchId) is not (_, var game))
+        if (Gate(move.MatchId) is not (var match, var game))
         {
             return Hold(move.MatchId);
         }
@@ -126,7 +126,7 @@ internal sealed class GameplayProtocol(SessionContext context)
 
         if (move.RollIndex < game.RollCount || game.Phase != TurnPhase.AwaitingMove || game.CurrentPlayer.Id != from)
         {
-            context.AddLog($"Ignored an out-of-turn move from {context.NameOf(from)}.");
+            match.AddLog($"Ignored an out-of-turn move from {context.NameOf(from)}.");
             return DispatchResult.Ignored;
         }
 
@@ -136,20 +136,20 @@ internal sealed class GameplayProtocol(SessionContext context)
         }
         catch (DomainException)
         {
-            context.AddLog($"Rejected an illegal move from {context.NameOf(from)}.");
+            match.AddLog($"Rejected an illegal move from {context.NameOf(from)}.");
             return DispatchResult.Ignored;
         }
 
-        context.RecordStep(new MatchStep(MatchStepKind.Move, from, move.TokenIndex));
-        context.FlushGameEvents();
+        context.RecordStep(match, new MatchStep(MatchStepKind.Move, from, move.TokenIndex));
+        context.FlushGameEvents(match);
         return DispatchResult.Handled;
     }
 
     public void OnPeerGone(PlayerId peer)
     {
-        if (context.Match is { Phase: MatchPhase.Playing, IsPlaying: true, Game: { } game })
+        if (context.SeatedMatch is { } match)
         {
-            DropPlayer(game, peer);
+            DropPlayer(match, peer);
         }
     }
 
@@ -157,32 +157,29 @@ internal sealed class GameplayProtocol(SessionContext context)
     /// Takes a player out of the game (they left or disconnected). If a roll was only waiting for their
     /// share, it completes now instead of stalling.
     /// </summary>
-    public void DropPlayer(LudoGame game, PlayerId player)
+    public void DropPlayer(MatchState match, PlayerId player)
     {
-        RemovePlayer(game, player);
-        if (context.Match is { } match)
-        {
-            TryCompleteRound(match);
-        }
+        RemovePlayer(match, player);
+        TryCompleteRound(match);
     }
 
     /// <summary>Takes a player out of the game; their tokens leave the board.</summary>
-    private void RemovePlayer(LudoGame game, PlayerId player)
+    private void RemovePlayer(MatchState match, PlayerId player)
     {
-        if (context.Match is not { } match || !match.IsActivePlayer(player))
+        if (match.Game is not { } game || !match.IsActivePlayer(player))
         {
             return;
         }
 
         game.RemovePlayer(player);
-        context.RecordStep(new MatchStep(MatchStepKind.Remove, player, 0));
+        context.RecordStep(match, new MatchStep(MatchStepKind.Remove, player, 0));
         if (match.Dice.OpenRoll is { } open && (match.Dice.Roller == player || game.Phase == TurnPhase.GameOver))
         {
             // The roller is gone (so the turn has moved on) or the game ended: the round is void.
             match.Dice.Close(open);
         }
 
-        context.FlushGameEvents();
+        context.FlushGameEvents(match);
     }
 
     private void OpenRound(MatchState match, int rollIndex, PlayerId roller)
@@ -190,7 +187,7 @@ internal sealed class GameplayProtocol(SessionContext context)
         match.Dice.Open(rollIndex, roller);
         var share = match.Chain!.Reveal(rollIndex);
         StoreReveal(match, context.LocalId, rollIndex, share);
-        context.SendToPlayers(new RevealMessage(match.Id, rollIndex, share));
+        context.SendToPlayers(match, new RevealMessage(match.Id, rollIndex, share));
         TryCompleteRound(match);
     }
 
@@ -227,8 +224,8 @@ internal sealed class GameplayProtocol(SessionContext context)
                 // Every player sees the same invalid share, so every player removes the same cheat.
                 foreach (var forger in forgers)
                 {
-                    context.AddLog($"{forger.Name} sent a forged dice share and was removed from the game.");
-                    RemovePlayer(game, forger.Id);
+                    match.AddLog($"{forger.Name} sent a forged dice share and was removed from the game.");
+                    RemovePlayer(match, forger.Id);
                 }
 
                 continue;
@@ -243,26 +240,26 @@ internal sealed class GameplayProtocol(SessionContext context)
             match.Dice.Close(rollIndex);
             var roller = game.CurrentPlayer.Id;
             game.Roll(roller, die);
-            context.RecordStep(new MatchStep(MatchStepKind.Roll, roller, die.Value));
-            context.FlushGameEvents();
+            context.RecordStep(match, new MatchStep(MatchStepKind.Roll, roller, die.Value));
+            context.FlushGameEvents(match);
             return;
         }
     }
 
-    /// <summary>The current match and its board, if we are one of its players and it is under way.</summary>
+    /// <summary>The match and its board, if we are one of its players and it is under way.</summary>
     private (MatchState Match, LudoGame Game)? Gate(Guid matchId) =>
-        context.Match is { Id: var id, Phase: MatchPhase.Playing, IsPlaying: true, Game: { } game } match && id == matchId
+        context.FindMatch(matchId) is { Phase: MatchPhase.Playing, IsPlaying: true, Game: { } game } match
             ? (match, game)
             : null;
 
     /// <summary>Messages for a match that has not started for us yet wait; anything else is stale or not for us.</summary>
     private DispatchResult Hold(Guid matchId) =>
-        context.Match is { } match && match.Id == matchId
+        context.FindMatch(matchId) is { } match
             ? match.Phase == MatchPhase.Inviting ? DispatchResult.Deferred : DispatchResult.Ignored
             : context.PastMatches.Contains(matchId) ? DispatchResult.Ignored : DispatchResult.Deferred;
 
     private (MatchState Match, LudoGame Game) RequirePlaying() =>
-        context.Match is { Phase: MatchPhase.Playing, IsPlaying: true, Game: { } game } match
+        context.SeatedMatch is { Game: { } game } match
             ? (match, game)
             : throw new SessionException("You are not playing in a game.");
 }

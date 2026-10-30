@@ -215,71 +215,77 @@
 
                     <TextBlock Style="{StaticResource PaneTitle}" Text="Games" />
                     <TextBlock Style="{StaticResource Muted}" FontSize="12" Margin="0,2,0,14" TextWrapping="Wrap"
-                               Text="Invite anyone in the lobby. Everyone else can watch." />
+                               Text="Invite anyone who is free. Several games can run at once, and anyone can watch." />
 
-                    <!-- The current invite or game. -->
-                    <Grid Visibility="{Binding HasMatch, Converter={StaticResource BoolToVisibility}}" Margin="0,0,0,14"
-                          views:Motion.Enter="True">
-                        <Border CornerRadius="14" BorderBrush="{StaticResource Accent}" BorderThickness="2"
-                                Visibility="{Binding IsInvitedNow, Converter={StaticResource BoolToVisibility}}" views:Motion.Pulse="True">
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.8" Color="{StaticResource AccentColor}" />
-                            </Border.Effect>
-                        </Border>
-                        <Border CornerRadius="14" Padding="16" BorderThickness="1">
-                            <Border.Style>
-                                <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{StaticResource SurfaceRaised}" />
-                                    <Setter Property="BorderBrush" Value="{StaticResource Border}" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsInvitedNow}" Value="True">
-                                            <Setter Property="Background" Value="#2A2619" />
-                                            <Setter Property="BorderBrush" Value="Transparent" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Border.Style>
-                            <StackPanel>
-                                <TextBlock Text="{Binding GameTitle}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap" />
-                                <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="{Binding GameDetail}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                    <!-- The open invites and running games. -->
+                    <ItemsControl ItemsSource="{Binding MatchCards}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,14"
+                                      views:Motion.Enter="True">
+                                    <Border CornerRadius="14" BorderBrush="{StaticResource Accent}" BorderThickness="2"
+                                            Visibility="{Binding IsInvitedNow, Converter={StaticResource BoolToVisibility}}" views:Motion.Pulse="True">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.8" Color="{StaticResource AccentColor}" />
+                                        </Border.Effect>
+                                    </Border>
+                                    <Border CornerRadius="14" Padding="16" BorderThickness="1">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="{StaticResource SurfaceRaised}" />
+                                                <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsInvitedNow}" Value="True">
+                                                        <Setter Property="Background" Value="#2A2619" />
+                                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding GameTitle}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap" />
+                                            <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="{Binding GameDetail}" TextWrapping="Wrap" Margin="0,3,0,0" />
 
-                                <ItemsControl ItemsSource="{Binding Invitees}" Margin="0,12,0,0">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <DockPanel Margin="0,3">
-                                                <views:AvatarView DockPanel.Dock="Left" Person="{Binding Person}" Size="24" Margin="0,0,8,0" />
-                                                <TextBlock x:Name="Answer" DockPanel.Dock="Right" Text="{Binding Answer}" FontSize="12" FontWeight="SemiBold"
-                                                           VerticalAlignment="Center" Foreground="{StaticResource TextMuted}" />
-                                                <TextBlock Text="{Binding Person.Name}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                            </DockPanel>
-                                            <DataTemplate.Triggers>
-                                                <DataTrigger Binding="{Binding IsIn}" Value="True">
-                                                    <Setter TargetName="Answer" Property="Foreground" Value="{StaticResource Success}" />
-                                                </DataTrigger>
-                                            </DataTemplate.Triggers>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                            <ItemsControl ItemsSource="{Binding Invitees}" Margin="0,12,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <DockPanel Margin="0,3">
+                                                            <views:AvatarView DockPanel.Dock="Left" Person="{Binding Person}" Size="24" Margin="0,0,8,0" />
+                                                            <TextBlock x:Name="Answer" DockPanel.Dock="Right" Text="{Binding Answer}" FontSize="12" FontWeight="SemiBold"
+                                                                       VerticalAlignment="Center" Foreground="{StaticResource TextMuted}" />
+                                                            <TextBlock Text="{Binding Person.Name}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        </DockPanel>
+                                                        <DataTemplate.Triggers>
+                                                            <DataTrigger Binding="{Binding IsIn}" Value="True">
+                                                                <Setter TargetName="Answer" Property="Foreground" Value="{StaticResource Success}" />
+                                                            </DataTrigger>
+                                                        </DataTemplate.Triggers>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
 
-                                <WrapPanel Margin="-4,8,0,0">
-                                    <Button Margin="4" Padding="14,7" Content="{Binding BeginLabel}" Command="{Binding BeginCommand}"
-                                            Visibility="{Binding ShowBegin, Converter={StaticResource BoolToVisibility}}" />
-                                    <Button Margin="4" Padding="14,7" Content="Join game" Command="{Binding AcceptCommand}"
-                                            Visibility="{Binding ShowAccept, Converter={StaticResource BoolToVisibility}}" />
-                                    <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Not now" Command="{Binding DeclineCommand}"
-                                            Visibility="{Binding IsInvitedNow, Converter={StaticResource BoolToVisibility}}" />
-                                    <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Back out" Command="{Binding DeclineCommand}"
-                                            Visibility="{Binding ShowDecline, Converter={StaticResource BoolToVisibility}}" />
-                                    <Button Margin="4" Padding="14,7" Content="{Binding WatchLabel}" Command="{Binding WatchCommand}"
-                                            Visibility="{Binding ShowWatch, Converter={StaticResource BoolToVisibility}}" />
-                                    <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Cancel invite" Command="{Binding StopCommand}"
-                                            Visibility="{Binding ShowCancel, Converter={StaticResource BoolToVisibility}}" />
-                                    <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Stop game" Command="{Binding StopCommand}"
-                                            Visibility="{Binding ShowStop, Converter={StaticResource BoolToVisibility}}" />
-                                </WrapPanel>
-                            </StackPanel>
-                        </Border>
-                    </Grid>
+                                            <WrapPanel Margin="-4,8,0,0">
+                                                <Button Margin="4" Padding="14,7" Content="{Binding BeginLabel}" Command="{Binding BeginCommand}"
+                                                        Visibility="{Binding ShowBegin, Converter={StaticResource BoolToVisibility}}" />
+                                                <Button Margin="4" Padding="14,7" Content="Join game" Command="{Binding AcceptCommand}"
+                                                        Visibility="{Binding ShowAccept, Converter={StaticResource BoolToVisibility}}" />
+                                                <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Not now" Command="{Binding DeclineCommand}"
+                                                        Visibility="{Binding IsInvitedNow, Converter={StaticResource BoolToVisibility}}" />
+                                                <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Back out" Command="{Binding DeclineCommand}"
+                                                        Visibility="{Binding ShowDecline, Converter={StaticResource BoolToVisibility}}" />
+                                                <Button Margin="4" Padding="14,7" Content="{Binding WatchLabel}" Command="{Binding WatchCommand}"
+                                                        Visibility="{Binding ShowWatch, Converter={StaticResource BoolToVisibility}}" />
+                                                <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Cancel invite" Command="{Binding StopCommand}"
+                                                        Visibility="{Binding ShowCancel, Converter={StaticResource BoolToVisibility}}" />
+                                                <Button Margin="4" Padding="14,7" Style="{StaticResource SecondaryButton}" Content="Stop game" Command="{Binding StopCommand}"
+                                                        Visibility="{Binding ShowStop, Converter={StaticResource BoolToVisibility}}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
 
                     <!-- Picking who to invite. -->
                     <Border CornerRadius="14" Padding="16" Background="{StaticResource SurfaceRaised}" BorderBrush="{StaticResource Accent}"
@@ -288,7 +294,7 @@
                         <StackPanel>
                             <TextBlock FontWeight="SemiBold" FontSize="15" Text="{Binding Picking.Name, StringFormat='Invite to {0}'}" />
                             <TextBlock Style="{StaticResource Muted}" FontSize="12" Margin="0,2,0,10" Text="Pick who can join. Everyone else can watch." />
-                            <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="Nobody else is connected yet." TextWrapping="Wrap">
+                            <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="Nobody else is free right now." TextWrapping="Wrap">
                                 <TextBlock.Visibility>
                                     <Binding Path="InviteChoices.Count" Converter="{x:Static views:CountToVisibilityConverter.Instance}" ConverterParameter="invert" />
                                 </TextBlock.Visibility>

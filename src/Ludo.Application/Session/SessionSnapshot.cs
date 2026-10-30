@@ -46,6 +46,8 @@ public enum SeatStanding
     Left,
 }
 
+/// <param name="Match">The one of <paramref name="Matches"/> that concerns us most: ours, then an invite to us, then any other.</param>
+/// <param name="Matches">The lobby's invites and games, oldest first, including the last few that ended.</param>
 public sealed record SessionSnapshot(
     SessionStage Stage,
     string LocalName,
@@ -54,17 +56,18 @@ public sealed record SessionSnapshot(
     bool CanProposeGame,
     IReadOnlyList<string> JoinAddresses,
     MatchView? Match,
+    IReadOnlyList<MatchView> Matches,
     IReadOnlyList<string> Log,
     IReadOnlyList<ChatLineView> Chat,
     IReadOnlyList<DirectChatView> DirectChats,
     string LocalKey,
     IReadOnlyList<PollView> Polls)
 {
-    public static SessionSnapshot Empty { get; } = new(SessionStage.Idle, string.Empty, false, [], false, [], null, [], [], [], string.Empty, []);
+    public static SessionSnapshot Empty { get; } = new(SessionStage.Idle, string.Empty, false, [], false, [], null, [], [], [], [], string.Empty, []);
 }
 
 /// <param name="Key">Stable id for this member within the lobby; use it to message, nudge or invite them.</param>
-/// <param name="InGame">Holds a seat in the running game and has not left it.</param>
+/// <param name="InGame">Holds a seat in a running game and has not left it.</param>
 public sealed record MemberView(string Key, string Name, bool IsHost, bool IsLocal, bool IsReady, bool InGame, ProfileView Profile);
 
 /// <param name="Color">Index into the avatar palette, 0 to <see cref="SessionLimits.AvatarColors"/> - 1.</param>
@@ -125,7 +128,9 @@ public sealed record InviteView(Guid MatchId, string From, string GameName);
 
 /// <param name="IsPlaying">We hold a seat and have not left; false for spectators.</param>
 /// <param name="IsInvited">We may join: we were on the invite list, or everyone was invited.</param>
+/// <param name="CanAnswer">The invite is open to us right now: we were invited and aren't playing another game.</param>
 /// <param name="CanStart">We are the initiator and enough players have said yes.</param>
+/// <param name="Log">What happened in this game, oldest first.</param>
 public sealed record MatchView(
     Guid Id,
     GameInfo GameType,
@@ -134,10 +139,12 @@ public sealed record MatchView(
     MatchPhaseView Phase,
     InviteAnswer LocalAnswer,
     bool IsInvited,
+    bool CanAnswer,
     bool IsPlaying,
     IReadOnlyList<MatchMemberView> Invitees,
     bool CanStart,
     string? EndReason,
+    IReadOnlyList<string> Log,
     GameStateView? Game);
 
 public sealed record MatchMemberView(string Key, string Name, bool IsInitiator, bool IsLocal, InviteAnswer Answer);

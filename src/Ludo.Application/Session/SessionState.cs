@@ -110,6 +110,10 @@ internal sealed record MatchReply(bool Accepted, byte[]? Anchor);
 /// </summary>
 internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IReadOnlySet<PlayerId>? invitees)
 {
+    private const int MaxLogEntries = 200;
+
+    private readonly List<string> _log = [];
+
     public Guid Id { get; } = id;
 
     public PlayerId Initiator { get; } = initiator;
@@ -125,12 +129,6 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
 
     /// <summary>Answers to the invite. The initiator is in from the start.</summary>
     public Dictionary<PlayerId, MatchReply> Replies { get; } = [];
-
-    /// <summary>Initiator side: members who told us this invite is the one they hold.</summary>
-    public HashSet<PlayerId> SeenBy { get; } = [];
-
-    /// <summary>Initiator side: members who have not told us they hold the invite no longer block the start.</summary>
-    public bool SeenGraceOver { get; set; }
 
     /// <summary>Our dice commitment for this match, while we have said yes.</summary>
     public HashChain? Chain { get; set; }
@@ -152,10 +150,22 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
     /// <summary>Every change applied to the board, in order; spectators are sent this.</summary>
     public List<MatchStep> History { get; } = [];
 
+    /// <summary>What happened in this game, oldest first, so a board never shows another game's moves.</summary>
+    public IReadOnlyList<string> Log => _log;
+
     public string? EndReason { get; set; }
 
     /// <summary>Spectator side: we asked the initiator for a fresh replay and are waiting for it.</summary>
     public bool AwaitingReplay { get; set; }
+
+    public void AddLog(string entry)
+    {
+        _log.Add(entry);
+        if (_log.Count > MaxLogEntries)
+        {
+            _log.RemoveRange(0, _log.Count - MaxLogEntries);
+        }
+    }
 
     public bool IsInvited(PlayerId id) => id == Initiator || Invitees is null || Invitees.Contains(id);
 

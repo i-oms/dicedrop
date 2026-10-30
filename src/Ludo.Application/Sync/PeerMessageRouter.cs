@@ -147,10 +147,6 @@ internal sealed class PeerMessageRouter
                 return _matches.OnProposal(from, proposal);
             case MatchReplyMessage reply:
                 return _matches.OnReply(from, reply);
-            case MatchSeenMessage seen:
-                return _matches.OnSeen(from, seen);
-            case MatchOutrankedMessage outranked:
-                return _matches.OnOutranked(from, outranked);
             case GameStartMessage start:
                 return _matches.OnGameStart(from, start);
             case MatchLeaveMessage leave:

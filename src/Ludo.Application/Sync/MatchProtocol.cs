@@ -9,33 +9,39 @@ using Ludo.Domain.Players;
 namespace Ludo.Application.Sync;
 
 /// <summary>
-/// Games inside the lobby. Any member can ask who wants to play; everyone is invited, and those who say
-/// yes commit to a fresh dice chain. The initiator starts the game with them, can stop it at any time,
-/// and keeps everyone who is not playing (spectators, and players who left) up to date with its record
-/// of the match. One match runs at a time: if two invites cross, the one with the lower id wins everywhere,
-/// and a running game beats any invite. The initiator only starts once every member has confirmed it holds
-/// the invite, so a crossing invite can never take players away from a game that has already begun. A member
-/// that stays silent past a short grace period no longer holds up the start.
+/// Games inside the lobby. Any member who is free can ask who wants to play; those who say yes commit to
+/// a fresh dice chain. The initiator starts the game with them, can stop it at any time, and keeps everyone
+/// who is not playing (spectators, and players who left) up to date with its record of the match. Several
+/// games can run side by side, and invites never compete: each member is in at most one game, so saying yes
+/// to one invite takes back a yes to any other. A start that seats someone who has since moved on gets a
+/// leave back, so that game carries on without them.
 /// </summary>
-internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gameplay, SessionExecutor executor)
+internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gameplay)
 {
-    private static readonly TimeSpan InviteSeenGrace = TimeSpan.FromSeconds(5);
-
-    private ITimer? _inviteSeenTimer;
-
-    /// <param name="inviteeKeys">Members who may join; null or empty invites everyone in the lobby.</param>
+    /// <param name="inviteeKeys">Members who may join; null or empty invites everyone who is free.</param>
     public void ProposeLocal(string gameId, IReadOnlyCollection<string>? inviteeKeys)
     {
         RequireLobby();
         var game = GameCatalog.Find(gameId) ?? throw new SessionException("That game is not available.");
-        if (context.Match is { IsActive: true })
+        if (context.SeatedMatch is not null)
         {
-            throw new SessionException("A game is already being set up or played in this lobby.");
+            throw new SessionException("You are already in a game.");
+        }
+
+        if (context.OwnMatch is not null)
+        {
+            throw new SessionException("You already have an invite open.");
         }
 
         if (context.Roster.Count < 2)
         {
             throw new SessionException("Wait for someone else to join the lobby first.");
+        }
+
+        var busy = context.Roster.Where(r => r.Id != context.LocalId && context.IsInRunningGame(r.Id)).Select(r => r.Id).ToHashSet();
+        if (busy.Count == context.Roster.Count(r => r.Id != context.LocalId))
+        {
+            throw new SessionException("Everyone else is in a game right now.");
         }
 
         HashSet<PlayerId>? invitees = null;
@@ -51,27 +57,36 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
                 throw new SessionException("Those players are no longer in the lobby.");
             }
 
+            invitees.ExceptWith(busy);
+            if (invitees.Count == 0)
+            {
+                throw new SessionException("Those players are in a game right now.");
+            }
+
             if (invitees.Count + 1 > game.MaxPlayers)
             {
                 throw new SessionException($"{game.Name} takes at most {game.MaxPlayers} players.");
             }
         }
+        else if (busy.Count > 0)
+        {
+            invitees = context.Roster.Where(r => r.Id != context.LocalId && !busy.Contains(r.Id)).Select(r => r.Id).ToHashSet();
+        }
 
+        ReleaseOtherInvites(keep: null, "You started another invite.");
         var match = new MatchState(Guid.NewGuid(), context.LocalId, game.Id, invitees) { Chain = HashChain.Create(context.Crypto) };
         match.Replies[context.LocalId] = new MatchReply(true, match.Chain.Anchor);
-        context.Match = match;
+        context.AddMatch(match);
 
-        _inviteSeenTimer?.Dispose();
-        _inviteSeenTimer = context.Time.CreateTimer(_ => executor.Post(() => EndSeenGrace(match)), null, InviteSeenGrace, Timeout.InfiniteTimeSpan);
         context.Network.Broadcast(ProposalOf(match));
         context.AddLog(invitees is null ? $"You asked who wants to play {game.Name}." : $"You invited {string.Join(", ", invitees.Select(context.NameOf))} to {game.Name}.");
     }
 
-    public void AnswerLocal(bool accept)
+    public void AnswerLocal(Guid matchId, bool accept)
     {
-        if (context.Match is not { Phase: MatchPhase.Inviting } match)
+        if (context.FindMatch(matchId) is not { Phase: MatchPhase.Inviting } match)
         {
-            throw new SessionException("There is no open invite.");
+            throw new SessionException("That invite is no longer open.");
         }
 
         if (match.Initiator == context.LocalId)
@@ -84,20 +99,27 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
             throw new SessionException("You were not invited to this game, but you can watch it.");
         }
 
-        match.Chain = accept ? HashChain.Create(context.Crypto) : null;
-        var anchor = match.Chain?.Anchor;
-        match.Replies[context.LocalId] = new MatchReply(accept, anchor);
-        context.Network.Broadcast(new MatchReplyMessage(match.Id, accept, anchor));
+        if (accept)
+        {
+            if (context.SeatedMatch is not null)
+            {
+                throw new SessionException("Finish or leave your game before joining another.");
+            }
+
+            ReleaseOtherInvites(match, $"You joined {context.NameOf(match.Initiator)}'s game, so your invite was withdrawn.");
+        }
+
+        Answer(match, accept);
     }
 
     public void StartLocal()
     {
-        if (context.Match is not { Phase: MatchPhase.Inviting } match || match.Initiator != context.LocalId)
+        if (context.OwnMatch is not { Phase: MatchPhase.Inviting } match)
         {
             throw new SessionException("Only whoever sent the invite can start the game.");
         }
 
-        var players = context.AcceptedPlayers();
+        var players = context.AcceptedPlayers(match);
         if (players.Count == 0)
         {
             throw new SessionException("Nobody has accepted yet.");
@@ -106,11 +128,6 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         if (players.Any(p => !p.Ready))
         {
             throw new SessionException("Some players are still connecting to each other.");
-        }
-
-        if (!context.InviteReachedEveryone())
-        {
-            throw new SessionException("The invite is still reaching everyone in the lobby.");
         }
 
         var seats = players
@@ -125,7 +142,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
 
     public void LeaveLocal()
     {
-        if (context.Match is not { Phase: MatchPhase.Playing, IsPlaying: true, Game: { } game } match)
+        if (context.SeatedMatch is not { } match)
         {
             throw new SessionException("You are not playing in a game.");
         }
@@ -136,63 +153,45 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         }
 
         context.Network.Broadcast(new MatchLeaveMessage(match.Id));
-        gameplay.DropPlayer(game, context.LocalId);
+        gameplay.DropPlayer(match, context.LocalId);
         match.IsPlaying = false;
         match.Chain = null;
-        context.AddLog("You left the game. You can keep watching it.");
+        match.AddLog("You left the game. You can keep watching it.");
     }
 
     public void StopLocal()
     {
-        if (context.Match is not { IsActive: true } match || match.Initiator != context.LocalId)
+        if (context.OwnMatch is not { } match)
         {
             throw new SessionException("Only whoever started the game can stop it.");
         }
 
         context.Network.Broadcast(new MatchEndMessage(match.Id));
-        context.EndMatch(match.Phase == MatchPhase.Inviting ? "You withdrew the invite." : "You stopped the game.");
+        context.EndMatch(match, match.Phase == MatchPhase.Inviting ? "You withdrew the invite." : "You stopped the game.");
     }
 
     public DispatchResult OnProposal(PlayerId from, MatchProposalMessage proposal)
     {
         if (!IsGreeted(from) || proposal.ChainAnchor is not { Length: HashChain.ValueLength }
             || context.PastMatches.Contains(proposal.MatchId)
+            || context.FindMatch(proposal.MatchId) is not null
             || GameCatalog.Find(proposal.GameId) is not { } game
             || proposal.Invitees is { Count: 0 or > SessionContext.MaxPlayers })
         {
             return DispatchResult.Ignored;
         }
 
-        if (context.Match is { IsActive: true } current)
+        // Each member runs one game at a time, so its last one must have ended; the news may still be on its way.
+        if (RunsAMatch(from))
         {
-            if (current.Id == proposal.MatchId)
-            {
-                context.Network.Send(from, new MatchSeenMessage(proposal.MatchId));
-                return DispatchResult.Ignored;
-            }
-
-            // A running game beats any invite, and of two crossing invites the lower id wins on every peer.
-            if (current.Phase == MatchPhase.Playing || current.Id.CompareTo(proposal.MatchId) < 0)
-            {
-                context.PastMatches.Add(proposal.MatchId);
-                context.Network.Send(from, new MatchOutrankedMessage(proposal.MatchId));
-                if (current.Phase == MatchPhase.Playing && current.Initiator == context.LocalId)
-                {
-                    SendReplay(from, current);
-                }
-
-                return DispatchResult.Ignored;
-            }
-
-            Supersede(current, $"{context.NameOf(from)} asked first, so your invite was withdrawn.");
+            return DispatchResult.Deferred;
         }
 
         var match = new MatchState(proposal.MatchId, from, game.Id, proposal.Invitees?.ToHashSet());
         match.Replies[from] = new MatchReply(true, proposal.ChainAnchor);
-        context.Match = match;
-        context.Network.Send(from, new MatchSeenMessage(match.Id));
+        context.AddMatch(match);
         var name = context.NameOf(from);
-        if (match.IsInvited(context.LocalId))
+        if (match.IsInvited(context.LocalId) && context.SeatedMatch is null)
         {
             context.AddLog($"{name} wants to play {game.Name}.");
             context.Presenter.PresentInvite(new InviteView(match.Id, name, game.Name));
@@ -201,6 +200,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         {
             context.AddLog($"{name} is setting up a game of {game.Name}.");
         }
+
         return DispatchResult.Handled;
     }
 
@@ -218,37 +218,6 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         }
 
         match.Replies[from] = new MatchReply(reply.Accepted, reply.Accepted ? reply.ChainAnchor : null);
-        match.SeenBy.Add(from);
-        return DispatchResult.Handled;
-    }
-
-    public DispatchResult OnSeen(PlayerId from, MatchSeenMessage seen)
-    {
-        if (Find(seen.MatchId) is not { } match)
-        {
-            return Unknown(seen.MatchId);
-        }
-
-        if (match.Phase != MatchPhase.Inviting || match.Initiator != context.LocalId || !IsGreeted(from))
-        {
-            return DispatchResult.Ignored;
-        }
-
-        match.SeenBy.Add(from);
-        return DispatchResult.Handled;
-    }
-
-    /// <summary>Our invite lost to a game we may not be able to hear ourselves; withdraw it instead of waiting forever.</summary>
-    public DispatchResult OnOutranked(PlayerId from, MatchOutrankedMessage outranked)
-    {
-        if (Find(outranked.MatchId) is not { Phase: MatchPhase.Inviting } match
-            || match.Initiator != context.LocalId || !IsGreeted(from))
-        {
-            return DispatchResult.Ignored;
-        }
-
-        context.Network.Broadcast(new MatchEndMessage(match.Id));
-        context.EndMatch("Another game is already being set up or played in this lobby, so your invite was withdrawn.");
         return DispatchResult.Handled;
     }
 
@@ -289,14 +258,14 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
             return Unknown(leave.MatchId);
         }
 
-        if (match.Phase != MatchPhase.Playing || match.Game is not { } game)
+        if (match.Phase != MatchPhase.Playing || match.Game is null)
         {
             return DispatchResult.Ignored;
         }
 
         if (match.IsPlaying)
         {
-            gameplay.DropPlayer(game, from);
+            gameplay.DropPlayer(match, from);
         }
 
         if (match.Initiator == context.LocalId)
@@ -316,7 +285,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         }
 
         var name = context.NameOf(from);
-        context.EndMatch(match.Phase == MatchPhase.Inviting ? $"{name} withdrew the invite." : $"{name} stopped the game.");
+        context.EndMatch(match, match.Phase == MatchPhase.Inviting ? $"{name} withdrew the invite." : $"{name} stopped the game.");
         return DispatchResult.Handled;
     }
 
@@ -330,18 +299,15 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         var match = Find(replay.MatchId);
         if (match is null)
         {
-            // A game that was already running when we arrived, or one that beat our own invite. Only its
-            // initiator, always seat 0, sends these.
+            // A game that was already running when we arrived. Only its initiator, always seat 0, sends these.
             if (!IsGreeted(from) || replay.Seats.Count == 0 || replay.Seats[0].Id != from)
             {
                 return DispatchResult.Ignored;
             }
 
-            if (context.Match is { IsActive: true } current)
+            if (RunsAMatch(from))
             {
-                // A replay alone cannot end an open invite, or any member could cancel it. A real game gets
-                // the invite withdrawn through its initiator, and then we can follow it.
-                return current.Phase == MatchPhase.Playing ? DispatchResult.Ignored : DispatchResult.Deferred;
+                return DispatchResult.Deferred;
             }
 
             match = new MatchState(replay.MatchId, from, GameCatalog.Find(replay.GameId)?.Id ?? GameCatalog.Ludo.Id, invitees: null);
@@ -368,9 +334,9 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
 
         // History is replayed silently; only what happens from now on is narrated.
         game.DequeueEvents();
-        if (context.Match != match)
+        if (Find(match.Id) is null)
         {
-            context.Match = match;
+            context.AddMatch(match);
             context.AddLog($"{context.NameOf(from)}'s game is in progress. You can watch it.");
         }
 
@@ -417,7 +383,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         }
 
         match.History.Add(message.Step);
-        context.FlushGameEvents();
+        context.FlushGameEvents(match);
         return DispatchResult.Handled;
     }
 
@@ -432,50 +398,71 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         return DispatchResult.Ignored;
     }
 
-    /// <summary>Brings a newly greeted lobby member into the current invite or game.</summary>
+    /// <summary>Brings a newly greeted lobby member into the open invites and running games.</summary>
     public void OnMemberGreeted(PlayerId member)
     {
-        if (context.Match is not { IsActive: true } match)
+        foreach (var match in context.Matches.Where(m => m.IsActive))
         {
-            return;
-        }
-
-        if (match.Phase == MatchPhase.Playing)
-        {
-            if (match.Initiator == context.LocalId)
+            if (match.Phase == MatchPhase.Playing)
             {
-                SendReplay(member, match);
+                if (match.Initiator == context.LocalId)
+                {
+                    SendReplay(member, match);
+                }
+
+                continue;
             }
 
-            return;
-        }
-
-        // Every player sends its own commitment, so the newcomer can check the start message against it.
-        if (match.Initiator == context.LocalId)
-        {
-            context.Network.Send(member, ProposalOf(match));
-        }
-        else if (match.Replies.TryGetValue(context.LocalId, out var reply) && reply.Accepted)
-        {
-            context.Network.Send(member, new MatchReplyMessage(match.Id, true, reply.Anchor));
+            // Every player sends its own commitment, so the newcomer can check the start message against it.
+            if (match.Initiator == context.LocalId)
+            {
+                context.Network.Send(member, ProposalOf(match));
+            }
+            else if (match.Replies.TryGetValue(context.LocalId, out var reply) && reply.Accepted)
+            {
+                context.Network.Send(member, new MatchReplyMessage(match.Id, true, reply.Anchor));
+            }
         }
     }
 
     /// <summary>The initiator leaving ends its match; anyone else just drops out of the invite.</summary>
     public void OnPeerGone(PlayerId peer)
     {
-        if (context.Match is not { IsActive: true } match)
+        foreach (var match in context.Matches.Where(m => m.IsActive))
         {
-            return;
+            if (peer == match.Initiator)
+            {
+                context.EndMatch(match, $"{context.NameOf(peer)} left the lobby, so their game ended.");
+            }
+            else if (match.Phase == MatchPhase.Inviting)
+            {
+                match.Replies.Remove(peer);
+            }
         }
+    }
 
-        if (peer == match.Initiator)
+    private void Answer(MatchState match, bool accept)
+    {
+        match.Chain = accept ? HashChain.Create(context.Crypto) : null;
+        var anchor = match.Chain?.Anchor;
+        match.Replies[context.LocalId] = new MatchReply(accept, anchor);
+        context.Network.Broadcast(new MatchReplyMessage(match.Id, accept, anchor));
+    }
+
+    /// <summary>We are about to commit to one game: withdraw our own invite and take back a yes to anyone else's.</summary>
+    private void ReleaseOtherInvites(MatchState? keep, string ownInviteNotice)
+    {
+        foreach (var other in context.Matches.Where(m => m.Phase == MatchPhase.Inviting && m != keep))
         {
-            context.EndMatch($"{context.NameOf(peer)} left the lobby, so their game ended.");
-        }
-        else if (match.Phase == MatchPhase.Inviting)
-        {
-            match.Replies.Remove(peer);
+            if (other.Initiator == context.LocalId)
+            {
+                context.Network.Broadcast(new MatchEndMessage(other.Id));
+                context.EndMatch(other, ownInviteNotice);
+            }
+            else if (other.Replies.TryGetValue(context.LocalId, out var reply) && reply.Accepted)
+            {
+                Answer(other, accept: false);
+            }
         }
     }
 
@@ -493,7 +480,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         }
         catch (DomainException ex)
         {
-            context.EndMatch($"The game could not start: {ex.Message}");
+            context.EndMatch(match, $"The game could not start: {ex.Message}");
             return;
         }
 
@@ -501,16 +488,16 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         match.Seats = start.Seats;
         match.Game = game;
         match.Phase = MatchPhase.Playing;
-        context.AddLog($"{context.NameOf(match.Initiator)} started a game with {start.Seats.Count} players.");
+        match.AddLog($"{context.NameOf(match.Initiator)} started a game with {start.Seats.Count} players.");
 
         if (match.IsSeated(context.LocalId))
         {
             if (ValidateCommitments(match, start) is { } problem)
             {
                 // Sitting out silently would stall everyone waiting for our dice shares.
-                context.AddLog($"You could not join the game: {problem}");
+                match.AddLog($"You could not join the game: {problem}");
                 context.Network.Broadcast(new MatchLeaveMessage(match.Id));
-                gameplay.DropPlayer(game, context.LocalId);
+                gameplay.DropPlayer(match, context.LocalId);
                 match.Chain = null;
             }
             else
@@ -523,7 +510,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
             }
         }
 
-        context.FlushGameEvents();
+        context.FlushGameEvents(match);
     }
 
     /// <summary>
@@ -556,13 +543,6 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         return null;
     }
 
-    /// <summary>Nothing else may happen at this moment, and the initiator's Start button may need to light up.</summary>
-    private void EndSeenGrace(MatchState match)
-    {
-        match.SeenGraceOver = true;
-        context.Publish();
-    }
-
     private void SendReplay(PlayerId peer, MatchState match) =>
         context.Network.Send(peer, new MatchReplayMessage(match.Id, match.GameId, match.Rules, match.Seats, match.History.ToArray()));
 
@@ -572,22 +552,6 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         {
             match.AwaitingReplay = true;
             context.Network.Send(match.Initiator, new MatchSyncRequestMessage(match.Id));
-        }
-    }
-
-    private void Supersede(MatchState current, string ownInviteNotice)
-    {
-        context.PastMatches.Add(current.Id);
-        if (current.Initiator == context.LocalId)
-        {
-            // Anyone still holding our invite drops it rather than waiting on it.
-            context.Network.Broadcast(new MatchEndMessage(current.Id));
-            context.AddLog(ownInviteNotice);
-        }
-        else
-        {
-            // Its initiator may not hear the winner itself; tell it, so it does not start with players who have moved on.
-            context.Network.Send(current.Initiator, new MatchOutrankedMessage(current.Id));
         }
     }
 
@@ -612,7 +576,9 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
     private static MatchProposalMessage ProposalOf(MatchState match) =>
         new(match.Id, match.Chain!.Anchor, match.GameId, match.Invitees?.ToArray());
 
-    private MatchState? Find(Guid matchId) => context.Match is { } match && match.Id == matchId ? match : null;
+    private MatchState? Find(Guid matchId) => context.FindMatch(matchId);
+
+    private bool RunsAMatch(PlayerId member) => context.Matches.Exists(m => m.IsActive && m.Initiator == member);
 
     /// <summary>A message for a match we have not heard of may have overtaken the invite; one for an old match is stale.</summary>
     private DispatchResult Unknown(Guid matchId) =>

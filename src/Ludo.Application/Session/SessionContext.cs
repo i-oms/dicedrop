@@ -24,6 +24,7 @@ internal sealed class SessionContext(
     private const int MaxChatEntries = 200;
     private const int MaxDirectEntries = 200;
     private const int MaxPolls = 50;
+    private const int MaxEndedMatches = 4;
 
     private readonly List<string> _log = [];
     private readonly List<ChatLineView> _chat = [];
@@ -60,10 +61,23 @@ internal sealed class SessionContext(
 
     public List<RosterSeat> Roster { get; } = [];
 
-    /// <summary>The lobby's current or most recent game; null until someone proposes one.</summary>
-    public MatchState? Match { get; set; }
+    /// <summary>The lobby's invites and games, oldest first, including the last few that ended.</summary>
+    public List<MatchState> Matches { get; } = [];
 
-    public LudoGame? Game => Match?.Game;
+    /// <summary>The running game we hold a seat in. A member plays one game at a time.</summary>
+    public MatchState? SeatedMatch => Matches.Find(m => m is { Phase: MatchPhase.Playing, IsPlaying: true });
+
+    /// <summary>The invite or running game we started. A member runs one at a time.</summary>
+    public MatchState? OwnMatch => Matches.Find(m => m.IsActive && m.Initiator == LocalId);
+
+    /// <summary>The match that concerns us most: ours, then one we said yes to or were asked to, then any other.</summary>
+    public MatchState? FocusMatch =>
+        SeatedMatch
+        ?? OwnMatch
+        ?? Matches.Find(m => m.Phase == MatchPhase.Inviting && m.Replies.TryGetValue(LocalId, out var reply) && reply.Accepted)
+        ?? Matches.Find(m => m.Phase == MatchPhase.Inviting && m.IsInvited(LocalId) && !m.Replies.ContainsKey(LocalId))
+        ?? Matches.FindLast(m => m.IsActive)
+        ?? Matches.LastOrDefault();
 
     /// <summary>Matches that ended in this session; late messages for them are dropped, not parked.</summary>
     public HashSet<Guid> PastMatches { get; } = [];
@@ -123,7 +137,7 @@ internal sealed class SessionContext(
     {
         Stage = SessionStage.Idle;
         HostId = null;
-        Match = null;
+        Matches.Clear();
         PastMatches.Clear();
         Polls.Clear();
         PastPolls.Clear();
@@ -229,14 +243,30 @@ internal sealed class SessionContext(
     public string NameOf(PlayerId id) =>
         (id == LocalId ? LocalName : null)
         ?? Roster.Find(r => r.Id == id)?.Name
-        ?? Game?.FindPlayer(id)?.Name
+        ?? Matches.Select(m => m.Game?.FindPlayer(id)?.Name).FirstOrDefault(n => n is not null)
         ?? (Peers.TryGetValue(id, out var peer) ? peer.Name : null)
         ?? id.ToString();
 
-    /// <summary>Turns pending domain events into log lines and marks the match finished when the game ends.</summary>
-    public void FlushGameEvents()
+    public MatchState? FindMatch(Guid id) => Matches.Find(m => m.Id == id);
+
+    /// <summary>Adds an invite or game. Each member runs one at a time, so only ended ones need trimming.</summary>
+    public void AddMatch(MatchState match)
     {
-        if (Match is not { Game: { } game } match)
+        Matches.Add(match);
+        var ended = Matches.Where(m => !m.IsActive).ToArray();
+        foreach (var old in ended.Take(ended.Length - MaxEndedMatches))
+        {
+            Matches.Remove(old);
+        }
+    }
+
+    /// <summary>The member holds a seat in a running game and has not left it, so it can't be invited to another.</summary>
+    public bool IsInRunningGame(PlayerId id) => Matches.Exists(m => m.Phase == MatchPhase.Playing && m.IsActivePlayer(id));
+
+    /// <summary>Turns pending domain events into log lines and marks the match finished when the game ends.</summary>
+    public void FlushGameEvents(MatchState match)
+    {
+        if (match.Game is not { } game)
         {
             return;
         }
@@ -245,7 +275,7 @@ internal sealed class SessionContext(
         {
             if (EventNarrator.Describe(domainEvent, game) is { } line)
             {
-                AddLog(line);
+                match.AddLog(line);
             }
 
             if (domainEvent is GameEnded && match.Phase == MatchPhase.Playing)
@@ -261,13 +291,8 @@ internal sealed class SessionContext(
     /// Notes a change just applied to the board. The initiator forwards it to everyone not playing,
     /// which is how spectators follow the game without taking part in the dice protocol.
     /// </summary>
-    public void RecordStep(MatchStep step)
+    public void RecordStep(MatchState match, MatchStep step)
     {
-        if (Match is not { } match)
-        {
-            return;
-        }
-
         match.History.Add(step);
         if (match.Initiator != LocalId)
         {
@@ -282,8 +307,8 @@ internal sealed class SessionContext(
     }
 
     /// <summary>Lobby members, other than the initiator, who said yes to the open invite and are connected to us.</summary>
-    public List<RosterSeat> AcceptedPlayers() =>
-        Match is { Phase: MatchPhase.Inviting } match
+    public List<RosterSeat> AcceptedPlayers(MatchState match) =>
+        match.Phase == MatchPhase.Inviting
             ? Roster
                 .Where(r => r.Id != match.Initiator
                     && match.Replies.TryGetValue(r.Id, out var reply) && reply.Accepted
@@ -291,34 +316,19 @@ internal sealed class SessionContext(
                 .ToList()
             : [];
 
-    /// <summary>
-    /// Initiator side: every member we are connected to holds our open invite. Until then a crossing
-    /// invite may still be winning on some peer, and starting would seat players who no longer follow us.
-    /// A crossing invite arrives well within the grace period, so a member still silent after it can't stall us.
-    /// </summary>
-    public bool InviteReachedEveryone() =>
-        Match is { Phase: MatchPhase.Inviting } match
-        && (match.SeenGraceOver
-            || Peers.Values.All(p => !p.IsGreeted || match.SeenBy.Contains(p.Id)));
-
-    /// <summary>Sends to every other player still in the current match.</summary>
-    public void SendToPlayers(PeerMessage message)
+    /// <summary>Sends to every other player still in the match.</summary>
+    public void SendToPlayers(MatchState match, PeerMessage message)
     {
-        if (Match is not { } match)
-        {
-            return;
-        }
-
         foreach (var peer in Peers.Keys.Where(id => match.IsActivePlayer(id)))
         {
             Network.Send(peer, message);
         }
     }
 
-    /// <summary>Closes the current invite or game for good; the board stays visible until the next one.</summary>
-    public void EndMatch(string reason)
+    /// <summary>Closes an invite or game for good; its board stays visible for a while.</summary>
+    public void EndMatch(MatchState match, string reason)
     {
-        if (Match is not { IsActive: true } match)
+        if (!match.IsActive)
         {
             return;
         }
@@ -329,13 +339,14 @@ internal sealed class SessionContext(
         match.Chain = null;
         match.Dice.Reset();
         PastMatches.Add(match.Id);
+        match.AddLog(reason);
         AddLog(reason);
     }
 
     /// <summary>Short fingerprint of the replicated game state, compared between peers to spot desyncs.</summary>
-    public string ComputeDigest()
+    public string ComputeDigest(MatchState match)
     {
-        if (Game is not { } game)
+        if (match.Game is not { } game)
         {
             return string.Empty;
         }

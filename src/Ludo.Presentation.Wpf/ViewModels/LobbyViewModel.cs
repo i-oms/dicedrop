@@ -38,34 +38,21 @@ public sealed class LobbyViewModel : ObservableObject
     private readonly Action<Exception> _onError;
     private readonly Dictionary<string, PersonViewModel> _people = [];
     private readonly Dictionary<string, ConversationViewModel> _direct = [];
+    private readonly Action<Guid> _viewGame;
     private readonly AsyncCommand _sendInviteCommand;
-    private readonly AsyncCommand _beginCommand;
     private ConversationViewModel _selected;
     private PersonViewModel _me = new(string.Empty);
     private IReadOnlyList<PersonViewModel> _members = [];
-    private IReadOnlyList<InviteeItem> _invitees = [];
     private string _status = string.Empty;
     private bool _canPropose;
-    private bool _canBegin;
     private GameInfo? _picking;
-    private bool _hasMatch;
-    private string _gameTitle = string.Empty;
-    private string _gameDetail = string.Empty;
-    private string _beginLabel = "Begin game";
-    private string _watchLabel = "Watch";
-    private bool _isInvitedNow;
-    private bool _showBegin;
-    private bool _showCancel;
-    private bool _showAccept;
-    private bool _showDecline;
-    private bool _showWatch;
-    private bool _showStop;
     private int _totalUnread;
 
-    internal LobbyViewModel(LudoApplication app, Action<Exception> onError, Action viewGame)
+    internal LobbyViewModel(LudoApplication app, Action<Exception> onError, Action<Guid> viewGame)
     {
         _app = app;
         _onError = onError;
+        _viewGame = viewGame;
         Notifications = new NotificationsViewModel(app, onError);
         LobbyChat = new ConversationViewModel(null, app, onError) { IsSelected = true };
         Conversations.Add(LobbyChat);
@@ -81,7 +68,6 @@ public sealed class LobbyViewModel : ObservableObject
             },
             onError,
             _ => Picking is not null && InviteChoices.Any(c => c.IsChecked));
-        _beginCommand = new AsyncCommand(_ => app.StartGame.ExecuteAsync(), onError, _ => CanBegin);
 
         SelectCommand = new AsyncCommand(item => { Select(item as ConversationViewModel); return Task.CompletedTask; }, onError);
         PickPlayersCommand = new AsyncCommand(game => { StartPicking((game as GameCardItem)?.Info); return Task.CompletedTask; }, onError);
@@ -90,10 +76,6 @@ public sealed class LobbyViewModel : ObservableObject
             key => app.ProposeGame.ExecuteAsync(GameCatalog.Ludo.Id, [(string)key!]),
             onError,
             _ => CanPropose);
-        AcceptCommand = new AsyncCommand(_ => app.AcceptInvite.ExecuteAsync(), onError);
-        DeclineCommand = new AsyncCommand(_ => app.DeclineInvite.ExecuteAsync(), onError);
-        StopCommand = new AsyncCommand(_ => app.StopGame.ExecuteAsync(), onError);
-        WatchCommand = new AsyncCommand(_ => { viewGame(); return Task.CompletedTask; }, onError);
         foreach (var game in GameCatalog.All)
         {
             Games.Add(new GameCardItem(game));
@@ -172,97 +154,8 @@ public sealed class LobbyViewModel : ObservableObject
         }
     }
 
-    /// <summary>An invite is open or a game exists, so the match card shows instead of the catalog.</summary>
-    public bool HasMatch
-    {
-        get => _hasMatch;
-        private set => SetProperty(ref _hasMatch, value);
-    }
-
-    public bool CanBegin
-    {
-        get => _canBegin;
-        private set
-        {
-            if (SetProperty(ref _canBegin, value))
-            {
-                _beginCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public string GameTitle
-    {
-        get => _gameTitle;
-        private set => SetProperty(ref _gameTitle, value);
-    }
-
-    public string GameDetail
-    {
-        get => _gameDetail;
-        private set => SetProperty(ref _gameDetail, value);
-    }
-
-    public IReadOnlyList<InviteeItem> Invitees
-    {
-        get => _invitees;
-        private set => SetProperty(ref _invitees, value);
-    }
-
-    /// <summary>An invite is waiting for our answer; the card is highlighted.</summary>
-    public bool IsInvitedNow
-    {
-        get => _isInvitedNow;
-        private set => SetProperty(ref _isInvitedNow, value);
-    }
-
-    public string BeginLabel
-    {
-        get => _beginLabel;
-        private set => SetProperty(ref _beginLabel, value);
-    }
-
-    public string WatchLabel
-    {
-        get => _watchLabel;
-        private set => SetProperty(ref _watchLabel, value);
-    }
-
-    public bool ShowBegin
-    {
-        get => _showBegin;
-        private set => SetProperty(ref _showBegin, value);
-    }
-
-    public bool ShowCancel
-    {
-        get => _showCancel;
-        private set => SetProperty(ref _showCancel, value);
-    }
-
-    public bool ShowAccept
-    {
-        get => _showAccept;
-        private set => SetProperty(ref _showAccept, value);
-    }
-
-    public bool ShowDecline
-    {
-        get => _showDecline;
-        private set => SetProperty(ref _showDecline, value);
-    }
-
-    public bool ShowWatch
-    {
-        get => _showWatch;
-        private set => SetProperty(ref _showWatch, value);
-    }
-
-    public bool ShowStop
-    {
-        get => _showStop;
-        private set => SetProperty(ref _showStop, value);
-    }
+    /// <summary>Open invites and running games, the one that concerns us first, then the last game that ended.</summary>
+    public ObservableCollection<MatchCardViewModel> MatchCards { get; } = [];
 
     public ICommand SelectCommand { get; }
 
@@ -275,17 +168,6 @@ public sealed class LobbyViewModel : ObservableObject
 
     /// <summary>Invites one person, by key, to a game of Ludo.</summary>
     public ICommand InvitePersonCommand { get; }
-
-    public ICommand BeginCommand => _beginCommand;
-
-    public ICommand AcceptCommand { get; }
-
-    public ICommand DeclineCommand { get; }
-
-    /// <summary>Withdraws our invite or stops our game.</summary>
-    public ICommand StopCommand { get; }
-
-    public ICommand WatchCommand { get; }
 
     /// <summary>Opens a conversation by person key; the empty key is the lobby chat.</summary>
     internal void OpenConversation(string key) =>
@@ -333,12 +215,17 @@ public sealed class LobbyViewModel : ObservableObject
             : connecting > 0 ? $"Connecting ({connecting} pending)…"
             : $"{snapshot.Members.Count} online";
 
+        if (!CanPropose)
+        {
+            Picking = null;
+        }
+
         if (Picking is not null)
         {
             SyncInviteChoices();
         }
 
-        UpdateGameCard(snapshot);
+        UpdateMatchCards(snapshot);
     }
 
     internal void Clear()
@@ -349,6 +236,7 @@ public sealed class LobbyViewModel : ObservableObject
         }
 
         Notifications.Update([], [], PersonOf);
+        MatchCards.Clear();
     }
 
     private PersonViewModel SenderOf(ChatLineView line) => PersonOf(line.SenderKey, line.Sender);
@@ -440,10 +328,10 @@ public sealed class LobbyViewModel : ObservableObject
         }
     }
 
-    /// <summary>Keeps the picker's list in line with who is in the lobby, keeping the ticks already made.</summary>
+    /// <summary>Keeps the picker's list in line with who is free to play, keeping the ticks already made.</summary>
     private void SyncInviteChoices()
     {
-        var ready = Members.Where(m => m.IsReady).ToArray();
+        var ready = Members.Where(m => m.IsReady && !m.InGame).ToArray();
         foreach (var gone in InviteChoices.Where(c => !ready.Contains(c.Person)).ToArray())
         {
             InviteChoices.Remove(gone);
@@ -459,65 +347,34 @@ public sealed class LobbyViewModel : ObservableObject
         _sendInviteCommand.RaiseCanExecuteChanged();
     }
 
-    private void UpdateGameCard(SessionSnapshot snapshot)
+    private void UpdateMatchCards(SessionSnapshot snapshot)
     {
-        var match = snapshot.Match;
-        var inviting = match is { Phase: MatchPhaseView.Inviting };
-        var running = match is { Phase: MatchPhaseView.Playing };
-        var mine = match?.IsInitiator == true;
-        var answer = match?.LocalAnswer ?? InviteAnswer.Pending;
-        var invited = match?.IsInvited == true;
+        var lastEnded = snapshot.Matches.LastOrDefault(m => m.Phase is MatchPhaseView.Finished or MatchPhaseView.Stopped && m.Game is not null);
+        var shown = snapshot.Matches
+            .Where(m => m.Phase is MatchPhaseView.Inviting or MatchPhaseView.Playing || m == lastEnded)
+            .OrderByDescending(m => m.Id == snapshot.Match?.Id)
+            .ToArray();
 
-        HasMatch = inviting || running || match?.Game is not null;
-        if (inviting || running)
+        foreach (var gone in MatchCards.Where(c => shown.All(m => m.Id != c.MatchId)).ToArray())
         {
-            Picking = null;
+            MatchCards.Remove(gone);
         }
 
-        ShowBegin = inviting && mine;
-        ShowCancel = inviting && mine;
-        ShowAccept = inviting && !mine && invited && answer != InviteAnswer.Accepted;
-        ShowDecline = inviting && !mine && invited && answer == InviteAnswer.Accepted;
-        ShowStop = running && mine;
-        ShowWatch = match?.Game is not null;
-        WatchLabel = running ? (match!.IsPlaying ? "Return to game" : "Watch") : "View last game";
-        IsInvitedNow = inviting && !mine && invited && answer == InviteAnswer.Pending;
-        CanBegin = match?.CanStart == true;
-
-        Invitees = inviting
-            ? match!.Invitees
-                .Select(i => new InviteeItem(
-                    PersonOf(i.Key, i.Name),
-                    i.IsInitiator ? "Host" : i.Answer switch { InviteAnswer.Accepted => "In", InviteAnswer.Declined => "Out", _ => "Invited" },
-                    i.IsInitiator || i.Answer == InviteAnswer.Accepted))
-                .ToArray()
-            : [];
-        var players = match?.Invitees.Count(i => i.Answer == InviteAnswer.Accepted) ?? 0;
-        BeginLabel = $"Begin game ({players} players)";
-
-        var game = match?.GameType.Name ?? GameCatalog.Ludo.Name;
-        (GameTitle, GameDetail) = match switch
+        for (var i = 0; i < shown.Length; i++)
         {
-            { Phase: MatchPhaseView.Inviting, IsInitiator: true } => (
-                $"Waiting for players",
-                players > 1 ? "Begin whenever everyone who wants to play has said yes." : "Nobody has said yes yet."),
-            { Phase: MatchPhaseView.Inviting, IsInvited: false } => (
-                $"{match.InitiatorName} is setting up {game}",
-                "You weren't invited this time, but you can watch once it begins."),
-            { Phase: MatchPhaseView.Inviting } when answer == InviteAnswer.Accepted => (
-                "You're in!",
-                $"Waiting for {match.InitiatorName} to begin the game…"),
-            { Phase: MatchPhaseView.Inviting } when answer == InviteAnswer.Declined => (
-                $"{match.InitiatorName} is setting up {game}",
-                "You said not now. You can still join until it begins."),
-            { Phase: MatchPhaseView.Inviting } => (
-                $"{match.InitiatorName} invited you to {game}",
-                "Join in, or skip this one and watch."),
-            { Phase: MatchPhaseView.Playing } => (
-                match.IsInitiator ? $"Your {game} game is on" : $"{match.InitiatorName}'s {game} game is on",
-                $"{string.Join(", ", match.Game?.Seats.Where(s => s.Standing != SeatStanding.Left).Select(s => s.Name) ?? [])} playing."),
-            { } => ($"Last game: {game}", match.EndReason ?? "The game is over."),
-            _ => (string.Empty, string.Empty),
-        };
+            var match = shown[i];
+            var card = MatchCards.FirstOrDefault(c => c.MatchId == match.Id);
+            if (card is null)
+            {
+                card = new MatchCardViewModel(match.Id, _app, _onError, _viewGame);
+                MatchCards.Insert(i, card);
+            }
+            else if (MatchCards.IndexOf(card) != i)
+            {
+                MatchCards.Move(MatchCards.IndexOf(card), i);
+            }
+
+            card.Update(match, PersonOf);
+        }
     }
 }

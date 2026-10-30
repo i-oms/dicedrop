@@ -114,21 +114,19 @@ public sealed class MainViewModel : ObservableObject
             _viewing = match.Id;
         }
 
-        if (match?.Game is null || match.Id != _viewing)
-        {
-            _viewing = null;
-        }
+        var viewed = snapshot.Matches.FirstOrDefault(m => m.Id == _viewing && m.Game is not null);
+        _viewing = viewed?.Id;
 
         Lobby.Update(snapshot);
         Searching.PlayerName = snapshot.LocalName;
-        if (_viewing is null)
+        if (viewed is null)
         {
             Game.Clear();
             CurrentScreen = Lobby;
             return;
         }
 
-        Game.Update(snapshot);
+        Game.Update(viewed);
         CurrentScreen = Game;
     }
 
@@ -139,13 +137,10 @@ public sealed class MainViewModel : ObservableObject
         Lobby.OpenConversation(key);
     }
 
-    private void ViewGame()
+    private void ViewGame(Guid matchId)
     {
-        if (_snapshot.Match is { Game: not null } match)
-        {
-            _viewing = match.Id;
-            Refresh();
-        }
+        _viewing = matchId;
+        Refresh();
     }
 
     internal void BackToLobby()

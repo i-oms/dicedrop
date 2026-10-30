@@ -84,7 +84,7 @@ Most of the time the cause is a Windows Firewall **BLOCK** rule that was created
 
 1. **The lobby forms by itself.** The first PC to open DiceDrop becomes the host. If two lobbies open at the same moment, the smaller one merges into the bigger one within a second or two. If the host leaves, the longest-standing member takes over.
 2. **Chat.** The window works like a messenger. People and chats are on the left, the open chat is in the middle, and games are on the right. **Lobby** is the group chat; click a person to chat privately. In a private chat, **Nudge** shakes their window (at most once every 10 seconds). The tray icon's **Send message…** sends a message without opening the window.
-3. **Invite.** Anyone can pick a game on the right and click **Invite players**, or use **Invite to Ludo** in a private chat. Invitees choose **Join game** or **Not now**, and whoever sent the invite clicks **Begin game** when ready.
+3. **Invite.** Anyone not already in a game can pick a game on the right and click **Invite players**, or use **Invite to Ludo** in a private chat. Invitees choose **Join game** or **Not now**, and whoever sent the invite clicks **Begin game** when ready. Several games can run at once in the same lobby, so 8 people can split into two boards of 4 and still share the lobby chat.
 4. **Roll and move.** Click the dice or press **Space**, then click one of your bouncing pawns.
 5. **Watch or leave.** Players not in the game can **Watch** it live. Players can **Leave game** at any time and keep watching. Whoever started the game can **Stop game** for everyone.
 

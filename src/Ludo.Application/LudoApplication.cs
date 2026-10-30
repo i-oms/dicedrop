@@ -26,7 +26,7 @@ public sealed class LudoApplication : IAsyncDisposable
         _executor = new SessionExecutor(ex => presenter.PresentNotice($"Unexpected error: {ex.Message}"));
         var context = new SessionContext(network, discovery, crypto, presenter, time, localId ?? PlayerId.New());
         var gameplay = new GameplayProtocol(context);
-        var matches = new MatchProtocol(context, gameplay, _executor);
+        var matches = new MatchProtocol(context, gameplay);
         var lobby = new LobbyProtocol(context, matches);
         var polls = new PollProtocol(context);
         var router = new PeerMessageRouter(context, _executor, lobby, matches, gameplay, polls);
@@ -34,8 +34,8 @@ public sealed class LudoApplication : IAsyncDisposable
         HostLobby = new HostLobbyUseCase(context, _executor, lobby);
         JoinLobby = new JoinLobbyUseCase(context, _executor);
         ProposeGame = new ProposeGameUseCase(context, _executor, router, matches);
-        AcceptInvite = new MatchCommandUseCase(context, _executor, router, () => matches.AnswerLocal(accept: true));
-        DeclineInvite = new MatchCommandUseCase(context, _executor, router, () => matches.AnswerLocal(accept: false));
+        AcceptInvite = new AnswerInviteUseCase(context, _executor, router, matches, accept: true);
+        DeclineInvite = new AnswerInviteUseCase(context, _executor, router, matches, accept: false);
         StartGame = new MatchCommandUseCase(context, _executor, router, matches.StartLocal);
         LeaveGame = new MatchCommandUseCase(context, _executor, router, matches.LeaveLocal);
         StopGame = new MatchCommandUseCase(context, _executor, router, matches.StopLocal);
@@ -60,9 +60,10 @@ public sealed class LudoApplication : IAsyncDisposable
     /// <summary>Any lobby member: invite some or all of the lobby to a game, which the caller then runs.</summary>
     public ProposeGameUseCase ProposeGame { get; }
 
-    public MatchCommandUseCase AcceptInvite { get; }
+    /// <summary>An invitee: join a game, which takes back a yes to any other invite.</summary>
+    public AnswerInviteUseCase AcceptInvite { get; }
 
-    public MatchCommandUseCase DeclineInvite { get; }
+    public AnswerInviteUseCase DeclineInvite { get; }
 
     /// <summary>The initiator: begin the game with everyone who accepted.</summary>
     public MatchCommandUseCase StartGame { get; }

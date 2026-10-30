@@ -167,9 +167,10 @@ public sealed class GameViewModel : ObservableObject
         Game = null;
     }
 
-    internal void Update(SessionSnapshot snapshot)
+    /// <summary>Shows the game on screen, which need not be the one we play in.</summary>
+    internal void Update(MatchView match)
     {
-        if (snapshot.Match is not { Game: { } game } match)
+        if (match.Game is not { } game)
         {
             return;
         }
@@ -193,7 +194,7 @@ public sealed class GameViewModel : ObservableObject
             s.IsCurrent,
             s.IsLocal,
             s.Standing == SeatStanding.Left)).ToArray();
-        Log = snapshot.Log.Reverse().ToArray();
+        Log = match.Log.Reverse().ToArray();
         DiceValue = game.LastRoll;
         RollCount = game.RollCount;
         IsRolling = game.Phase == GamePhaseView.Rolling;

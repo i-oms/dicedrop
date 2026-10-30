@@ -31,10 +31,10 @@ public sealed class PeerSessionTests
             await WaitUntil(() => peers.All(p => p.Latest.Match?.Phase == MatchPhaseView.Inviting), "invite did not reach everyone");
             foreach (var player in players.Where(p => p != initiator))
             {
-                await player.App.AcceptInvite.ExecuteAsync();
+                await player.App.AcceptInvite.ExecuteAsync(player.Latest.Match!.Id);
             }
 
-            await spectator.App.DeclineInvite.ExecuteAsync();
+            await spectator.App.DeclineInvite.ExecuteAsync(spectator.Latest.Match!.Id);
             await WaitUntil(
                 () => initiator.Latest.Match!.CanStart
                     && initiator.Latest.Match.Invitees.Count(i => i.Answer == InviteAnswer.Accepted) == playerCount,
@@ -49,7 +49,7 @@ public sealed class PeerSessionTests
 
             var results = peers.Select(p => Describe(p.Latest.Match!.Game!)).ToArray();
             Assert.All(results, r => Assert.Equal(results[0], r));
-            Assert.All(peers, p => Assert.DoesNotContain(p.Latest.Log, l => l.Contains("Warning", StringComparison.Ordinal)));
+            Assert.All(peers, p => Assert.DoesNotContain(p.Latest.Match!.Log, l => l.Contains("Warning", StringComparison.Ordinal)));
             Assert.Equal(playerCount, peers[0].Latest.Match!.Game!.Seats.Count(s => s.Rank is not null));
 
             // The lobby outlives the game, so anyone can start the next one.
@@ -229,7 +229,7 @@ public sealed class PeerSessionTests
             }
 
             await WaitUntil(
-                () => latecomer.Latest.Match is { Phase: MatchPhaseView.Playing, IsPlaying: false } m && m.Id == gameId,
+                () => latecomer.Latest.Matches.Any(m => m is { Phase: MatchPhaseView.Playing, IsPlaying: false } && m.Id == gameId),
                 "latecomer never ended up watching the running game");
             Assert.All(peers, p => Assert.Equal(gameId, p.Latest.Match!.Id));
             Assert.All(peers, p => Assert.True(p.Latest.Match!.IsPlaying));
@@ -237,42 +237,13 @@ public sealed class PeerSessionTests
 
             await peers[1].App.RollDice.ExecuteAsync();
             await WaitUntil(
-                () => peers.Append(latecomer).All(p => p.Latest.Match?.Game?.RollCount == 1),
+                () => peers.All(p => p.Latest.Match?.Game?.RollCount == 1)
+                    && latecomer.Latest.Matches.Single(m => m.Id == gameId).Game?.RollCount == 1,
                 "the game stalled after the stray invite");
         }
         finally
         {
             await latecomer.App.DisposeAsync();
-            await DisposeAllAsync(peers);
-        }
-    }
-
-    [Fact]
-    public async Task An_invite_its_rival_cannot_hear_is_withdrawn_instead_of_waiting_forever()
-    {
-        // P1 and P2 never hear each other's games, so only P0 sees both invites and must sort them out.
-        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
-        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
-        try
-        {
-            await FormLobbyAsync(peers);
-            var p1 = SessionContext.FindByKey(peers[1].Latest.LocalKey)!.Value;
-            var p2 = SessionContext.FindByKey(peers[2].Latest.LocalKey)!.Value;
-            networks[1].Mute(p2);
-            networks[2].Mute(p1);
-
-            await peers[1].App.ProposeGame.ExecuteAsync();
-            await WaitUntil(() => peers[0].Latest.Match?.Phase == MatchPhaseView.Inviting, "P0 never got the first invite");
-            await peers[2].App.ProposeGame.ExecuteAsync();
-
-            // Whichever invite wins at P0, the loser's initiator must drop its own rather than wait on it.
-            await WaitUntil(
-                () => peers[0].Latest.Match is { Phase: MatchPhaseView.Inviting } winner
-                    && peers.Skip(1).All(p => p.Latest.Match is { } m && (m.Id == winner.Id || m.Phase == MatchPhaseView.Stopped)),
-                "the losing invite was left waiting");
-        }
-        finally
-        {
             await DisposeAllAsync(peers);
         }
     }
@@ -333,39 +304,11 @@ public sealed class PeerSessionTests
         }
     }
 
-    [Fact]
-    public async Task A_member_who_never_confirms_the_invite_only_delays_the_start_briefly()
-    {
-        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
-        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
-        try
-        {
-            await FormLobbyAsync(peers);
-            networks[1].Mute(SessionContext.FindByKey(peers[2].Latest.LocalKey)!.Value);
-
-            await peers[1].App.ProposeGame.ExecuteAsync();
-            await WaitUntil(() => peers[0].Latest.Match?.Phase == MatchPhaseView.Inviting, "invite did not reach P0");
-            await peers[0].App.AcceptInvite.ExecuteAsync();
-            await WaitUntil(
-                () => peers[1].Latest.Match!.Invitees.Any(i => i.Name == "P0" && i.Answer == InviteAnswer.Accepted),
-                "the answer never arrived");
-            Assert.False(peers[1].Latest.Match!.CanStart);
-
-            await WaitUntil(() => peers[1].Latest.Match!.CanStart, "the silent member still blocks the start");
-            await peers[1].App.StartGame.ExecuteAsync();
-            await WaitUntil(() => peers[1].Latest.Match is { IsPlaying: true, Game: not null }, "the game did not start");
-        }
-        finally
-        {
-            await DisposeAllAsync(peers);
-        }
-    }
-
     private static MatchReplayMessage ReplayWithFirstSeat(Ludo.Domain.Players.PlayerId seat) =>
         new(Guid.NewGuid(), GameCatalog.Ludo.Id, Ludo.Domain.Gameplay.GameRules.Classic, [new SeatAssignment(seat, "Fake", new byte[32])], []);
 
     [Fact]
-    public async Task Crossing_invites_settle_on_one()
+    public async Task Crossing_invites_both_stay_open()
     {
         var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
         try
@@ -375,8 +318,180 @@ public sealed class PeerSessionTests
             await Task.WhenAll(peers[1].App.ProposeGame.ExecuteAsync(), peers[2].App.ProposeGame.ExecuteAsync());
 
             await WaitUntil(
-                () => peers.All(p => p.Latest.Match is { Phase: MatchPhaseView.Inviting } m && m.Id == peers[0].Latest.Match?.Id),
-                "peers disagree on the invite");
+                () => peers.All(p => p.Latest.Matches.Count(m => m.Phase == MatchPhaseView.Inviting) == 2),
+                "an invite went missing");
+            Assert.False(peers[1].Latest.CanProposeGame);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task Two_games_run_side_by_side_without_touching_each_other()
+    {
+        // P0 stays out and watches both.
+        var peers = Enumerable.Range(0, 5).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var first = await StartPairAsync(peers[1], peers[2], peers);
+            var second = await StartPairAsync(peers[3], peers[4], peers);
+            Assert.NotEqual(first, second);
+
+            // Only the watcher is left, so nobody can be invited any more, and those playing can't start another.
+            await WaitUntil(() => peers.Skip(1).All(p => p.Latest.Match?.IsPlaying == true && !p.Latest.CanProposeGame), "players still look free");
+            await WaitUntil(() => !peers[0].Latest.CanProposeGame, "the watcher still sees someone free");
+            await Assert.ThrowsAsync<SessionException>(() => peers[0].App.ProposeGame.ExecuteAsync());
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            await Task.WhenAll(peers.Skip(1).Select(p => p.PlayAsync(timeout.Token)));
+            await WaitUntil(
+                () => peers.All(p => p.Latest.Matches.Count(m => m.Phase == MatchPhaseView.Finished) == 2),
+                "someone never saw both games end");
+
+            foreach (var id in new[] { first, second })
+            {
+                var results = peers.Select(p => Describe(p.Latest.Matches.Single(m => m.Id == id).Game!)).ToArray();
+                Assert.All(results, r => Assert.Equal(results[0], r));
+            }
+
+            // Each game has its own board and record, whoever is looking.
+            var firstLog = peers[0].Latest.Matches.Single(m => m.Id == first).Log;
+            Assert.NotEmpty(firstLog);
+            Assert.DoesNotContain(firstLog, l => l.Contains("P3", StringComparison.Ordinal) || l.Contains("P4", StringComparison.Ordinal));
+            Assert.All(peers, p => Assert.DoesNotContain(p.Latest.Matches.SelectMany(m => m.Log), l => l.Contains("Warning", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task Eight_players_split_into_two_boards_of_four()
+    {
+        var peers = Enumerable.Range(0, 8).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var first = await StartGroupAsync(peers[0], peers[1..4], peers);
+            var second = await StartGroupAsync(peers[4], peers[5..8], peers);
+
+            // Lobby chat still reaches everyone while both games run.
+            await peers[1].App.SendChat.ExecuteAsync("good luck");
+            await WaitUntil(() => peers.All(p => p.Latest.Chat.Count == 1), "chat did not cross the two games");
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+            await Task.WhenAll(peers.Select(p => p.PlayAsync(timeout.Token)));
+            await WaitUntil(
+                () => peers.All(p => p.Latest.Matches.Count(m => m.Phase == MatchPhaseView.Finished) == 2),
+                "someone never saw both games end");
+
+            foreach (var id in new[] { first, second })
+            {
+                var results = peers.Select(p => Describe(p.Latest.Matches.Single(m => m.Id == id).Game!)).ToArray();
+                Assert.All(results, r => Assert.Equal(results[0], r));
+                Assert.Equal(4, peers[0].Latest.Matches.Single(m => m.Id == id).Game!.Seats.Count);
+            }
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task A_new_game_leaves_out_whoever_is_already_playing()
+    {
+        var peers = Enumerable.Range(0, 4).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            await StartPairAsync(peers[0], peers[1], peers);
+            await WaitUntil(() => peers[2].Latest.Members.Count(m => m.InGame) == 2, "players not shown as busy");
+
+            // Inviting everyone means everyone free; naming only busy players is refused.
+            await Assert.ThrowsAsync<SessionException>(() => peers[2].App.ProposeGame.ExecuteAsync(GameCatalog.Ludo.Id, [peers[1].Latest.LocalKey]));
+            await peers[2].App.ProposeGame.ExecuteAsync();
+            var invite = peers[2].Latest.Match!;
+            Assert.Equal(["P2", "P3"], invite.Invitees.Select(i => i.Name).Order());
+
+            await WaitUntil(() => peers[1].Latest.Matches.Any(m => m.Id == invite.Id), "invite never reached a player");
+            Assert.False(peers[1].Latest.Matches.Single(m => m.Id == invite.Id).CanAnswer);
+            await Assert.ThrowsAsync<SessionException>(() => peers[1].App.AcceptInvite.ExecuteAsync(invite.Id));
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task Saying_yes_to_one_invite_takes_back_a_yes_to_the_other_and_withdraws_your_own()
+    {
+        var peers = Enumerable.Range(0, 4).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            await peers[0].App.ProposeGame.ExecuteAsync();
+            await peers[2].App.ProposeGame.ExecuteAsync();
+            var a = peers[0].Latest.Match!.Id;
+            var b = peers[2].Latest.Match!.Id;
+            await WaitUntil(() => peers.All(p => p.Latest.Matches.Count(m => m.Phase == MatchPhaseView.Inviting) == 2), "invites did not reach everyone");
+
+            await peers[1].App.AcceptInvite.ExecuteAsync(a);
+            await WaitUntil(() => peers[0].Latest.Match!.CanStart, "first yes never arrived");
+
+            await peers[1].App.AcceptInvite.ExecuteAsync(b);
+            await WaitUntil(
+                () => peers[0].Latest.Matches.Single(m => m.Id == a).Invitees.Single(i => i.Name == "P1").Answer == InviteAnswer.Declined
+                    && peers[2].Latest.Matches.Single(m => m.Id == b).CanStart,
+                "the first yes was not taken back");
+            Assert.False(peers[0].Latest.Match!.CanStart);
+
+            // Joining someone else's game withdraws the invite we had open ourselves.
+            await peers[2].App.AcceptInvite.ExecuteAsync(a);
+            await WaitUntil(
+                () => peers.All(p => p.Latest.Matches.Single(m => m.Id == b).Phase == MatchPhaseView.Stopped),
+                "the joiner's own invite stayed open");
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task A_start_that_seats_someone_who_moved_on_only_loses_that_seat()
+    {
+        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            await peers[0].App.ProposeGame.ExecuteAsync();
+            await peers[2].App.ProposeGame.ExecuteAsync();
+            var a = peers[0].Latest.Match!.Id;
+            var b = peers[2].Latest.Match!.Id;
+            await WaitUntil(() => peers.All(p => p.Latest.Matches.Count(m => m.Phase == MatchPhaseView.Inviting) == 2), "invites did not reach everyone");
+            await peers[1].App.AcceptInvite.ExecuteAsync(a);
+            await WaitUntil(() => peers[0].Latest.Match!.CanStart, "yes never arrived");
+
+            // P0 never hears P1 change their mind, so it seats P1 anyway.
+            networks[0].Mute(SessionContext.FindByKey(peers[1].Latest.LocalKey)!.Value);
+            await peers[1].App.AcceptInvite.ExecuteAsync(b);
+            await WaitUntil(() => peers[2].Latest.Match!.CanStart, "second yes never arrived");
+            await peers[0].App.StartGame.ExecuteAsync();
+            await WaitUntil(() => peers[1].Latest.Matches.Single(m => m.Id == a).Game is not null, "the first game never reached P1");
+
+            var seen = peers[1].Latest.Matches.Single(m => m.Id == a);
+            Assert.False(seen.IsPlaying);
+            Assert.Equal(SeatStanding.Left, seen.Game!.Seats.Single(s => s.Name == "P1").Standing);
+
+            await peers[2].App.StartGame.ExecuteAsync();
+            await WaitUntil(() => peers[1].Latest.Match is { IsPlaying: true } m && m.Id == b, "P1 never got to play the game they chose");
         }
         finally
         {
@@ -621,9 +736,9 @@ public sealed class PeerSessionTests
             Assert.False(peers[1].Latest.Match!.IsInvited);
             Assert.Equal(GameCatalog.Ludo, peers[1].Latest.Match!.GameType);
             Assert.Equal(["P0", "P2"], peers[0].Latest.Match!.Invitees.Select(i => i.Name).Order());
-            await Assert.ThrowsAsync<SessionException>(() => peers[1].App.AcceptInvite.ExecuteAsync());
+            await Assert.ThrowsAsync<SessionException>(() => peers[1].App.AcceptInvite.ExecuteAsync(peers[1].Latest.Match!.Id));
 
-            await peers[2].App.AcceptInvite.ExecuteAsync();
+            await peers[2].App.AcceptInvite.ExecuteAsync(peers[2].Latest.Match!.Id);
             await WaitUntil(() => peers[0].Latest.Match!.CanStart, "answer never arrived");
             await peers[0].App.StartGame.ExecuteAsync();
             await WaitUntil(() => peers.All(p => p.Latest.Match?.Game is not null), "game did not reach everyone");
@@ -808,7 +923,7 @@ public sealed class PeerSessionTests
         await WaitUntil(() => peers.All(p => p.Latest.Match?.Phase == MatchPhaseView.Inviting), "invite did not reach everyone");
         foreach (var peer in peers.Where(p => p != initiator))
         {
-            await peer.App.AcceptInvite.ExecuteAsync();
+            await peer.App.AcceptInvite.ExecuteAsync(peer.Latest.Match!.Id);
         }
 
         await WaitUntil(
@@ -816,6 +931,29 @@ public sealed class PeerSessionTests
             "answers never arrived");
         await initiator.App.StartGame.ExecuteAsync();
         await WaitUntil(() => peers.All(p => p.Latest.Match is { IsPlaying: true, Game: not null }), "not everyone started");
+    }
+
+    /// <summary>The initiator invites only the partner, who accepts; returns the id of the game they then start.</summary>
+    private static Task<Guid> StartPairAsync(TestPeer initiator, TestPeer partner, TestPeer[] peers) =>
+        StartGroupAsync(initiator, [partner], peers);
+
+    /// <summary>The initiator invites only these partners, who accept; returns the id of the game they then start.</summary>
+    private static async Task<Guid> StartGroupAsync(TestPeer initiator, TestPeer[] partners, TestPeer[] peers)
+    {
+        await initiator.App.ProposeGame.ExecuteAsync(GameCatalog.Ludo.Id, partners.Select(p => p.Latest.LocalKey).ToArray());
+        var id = initiator.Latest.Match!.Id;
+        await WaitUntil(() => peers.All(p => p.Latest.Matches.Any(m => m.Id == id)), "invite did not reach everyone");
+        foreach (var partner in partners)
+        {
+            await partner.App.AcceptInvite.ExecuteAsync(id);
+        }
+
+        await WaitUntil(
+            () => initiator.Latest.Match!.CanStart && initiator.Latest.Match.Invitees.All(i => i.Answer == InviteAnswer.Accepted),
+            "answers never arrived");
+        await initiator.App.StartGame.ExecuteAsync();
+        await WaitUntil(() => partners.All(p => p.Latest.Match is { IsPlaying: true, Game: not null } m && m.Id == id), "a partner never started");
+        return id;
     }
 
     private static async Task DisposeAllAsync(IEnumerable<TestPeer> peers)

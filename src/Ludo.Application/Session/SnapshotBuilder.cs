@@ -13,8 +13,6 @@ internal static class SnapshotBuilder
             return SessionSnapshot.Empty;
         }
 
-        var match = context.Match;
-        var running = match is { Phase: MatchPhase.Playing };
         var members = context.Roster
             .Select(r => new MemberView(
                 SessionContext.KeyOf(r.Id),
@@ -22,10 +20,14 @@ internal static class SnapshotBuilder
                 r.Id == context.HostId,
                 r.Id == context.LocalId,
                 r.Ready,
-                running && match!.IsActivePlayer(r.Id),
+                context.IsInRunningGame(r.Id),
                 ToView(context.ProfileOf(r.Id))))
             .ToArray();
-        var canPropose = match is not { IsActive: true } && context.Roster.Count >= BoardTopology.MinPlayers;
+        var canPropose = context.SeatedMatch is null && context.OwnMatch is null
+            && context.Roster.Count >= BoardTopology.MinPlayers
+            && context.Roster.Exists(r => r.Id != context.LocalId && !context.IsInRunningGame(r.Id));
+        var matches = context.Matches.Select(m => BuildMatch(context, m)).ToArray();
+        var focus = context.FocusMatch;
         var joinAddresses = context.IsHost
             ? context.Network.GetLocalAddresses().Select(a => $"{a}:{context.Network.ListenPort}").ToArray()
             : [];
@@ -37,7 +39,8 @@ internal static class SnapshotBuilder
             members,
             canPropose,
             joinAddresses,
-            match is null ? null : BuildMatch(context, match),
+            focus is null ? null : Array.Find(matches, m => m.Id == focus.Id),
+            matches,
             context.Log.ToArray(),
             context.Chat.ToArray(),
             context.DirectChats
@@ -79,9 +82,8 @@ internal static class SnapshotBuilder
             .Where(r => match.IsInvited(r.Id))
             .Select(r => new MatchMemberView(SessionContext.KeyOf(r.Id), r.Name, r.Id == match.Initiator, r.Id == context.LocalId, AnswerOf(match, r.Id)))
             .ToArray();
-        var accepted = context.AcceptedPlayers();
-        var canStart = isInitiator && match.Phase == MatchPhase.Inviting && accepted.Count > 0 && accepted.TrueForAll(p => p.Ready)
-            && context.InviteReachedEveryone();
+        var accepted = context.AcceptedPlayers(match);
+        var canStart = isInitiator && match.Phase == MatchPhase.Inviting && accepted.Count > 0 && accepted.TrueForAll(p => p.Ready);
 
         return new MatchView(
             match.Id,
@@ -97,10 +99,12 @@ internal static class SnapshotBuilder
             },
             AnswerOf(match, context.LocalId),
             match.IsInvited(context.LocalId),
+            match.Phase == MatchPhase.Inviting && !isInitiator && match.IsInvited(context.LocalId) && context.SeatedMatch is null,
             match.IsPlaying,
             invitees,
             canStart,
             match.EndReason,
+            match.Log.ToArray(),
             match.Game is { } game ? BuildGame(context, match, game) : null);
     }
 
