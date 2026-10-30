@@ -135,6 +135,8 @@ internal sealed class PeerMessageRouter
                 return _polls.OnPoll(from, poll);
             case PollVoteMessage vote:
                 return _polls.OnVote(from, vote);
+            case PollRetractMessage retract:
+                return _polls.OnRetract(from, retract);
             case ProfileMessage profile:
                 return _lobby.OnProfile(from, profile);
             case JoinRejectedMessage rejected:

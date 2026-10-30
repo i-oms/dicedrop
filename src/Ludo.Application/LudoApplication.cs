@@ -48,6 +48,7 @@ public sealed class LudoApplication : IAsyncDisposable
         UpdateProfile = new UpdateProfileUseCase(context, _executor, lobby);
         SendPoll = new SendPollUseCase(context, _executor, polls);
         VotePoll = new VotePollUseCase(context, _executor, polls);
+        RetractPoll = new RetractPollUseCase(context, _executor, polls);
     }
 
     public HostLobbyUseCase HostLobby { get; }
@@ -93,6 +94,9 @@ public sealed class LudoApplication : IAsyncDisposable
 
     /// <summary>A recipient: answer a notification, or change the answer.</summary>
     public VotePollUseCase VotePoll { get; }
+
+    /// <summary>The sender: take a notification back from everyone it went to.</summary>
+    public RetractPollUseCase RetractPoll { get; }
 
     public async ValueTask DisposeAsync()
     {

@@ -134,6 +134,11 @@
 
                             <TextBlock Style="{StaticResource Muted}" FontSize="11" Text="{Binding Waiting}" TextWrapping="Wrap" Margin="0,8,0,0"
                                        Visibility="{Binding HasWaiting, Converter={StaticResource BoolToVisibility}}" />
+
+                            <!-- Unlike the cross above, this removes it for everyone it went to. -->
+                            <Button Style="{StaticResource SecondaryButton}" Content="Take back" Padding="10,4" FontSize="12" HorizontalAlignment="Left"
+                                    Margin="0,10,0,0" Command="{Binding TakeBackCommand}" ToolTip="Remove this group decision and its votes for everyone"
+                                    Visibility="{Binding IsMine, Converter={StaticResource BoolToVisibility}}" />
                         </StackPanel>
                     </Border>
                 </DataTemplate>

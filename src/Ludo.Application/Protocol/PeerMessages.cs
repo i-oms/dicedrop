@@ -5,7 +5,7 @@ namespace Ludo.Application.Protocol;
 
 public static class ProtocolInfo
 {
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>
     /// Port a host listens on when it can. Peers never depend on it: if it is taken, the host falls back
@@ -51,6 +51,9 @@ public sealed record PollMessage(Guid PollId, string Question, IReadOnlyList<str
 
 /// <summary>Recipient to the sender and the other recipients: my answer, replacing any earlier one.</summary>
 public sealed record PollVoteMessage(Guid PollId, int Option) : PeerMessage;
+
+/// <summary>Sender to the recipients: I took this back, so drop it and every answer to it.</summary>
+public sealed record PollRetractMessage(Guid PollId) : PeerMessage;
 
 /// <summary>Lobby member to everyone: my avatar changed. The first one travels in the Hello.</summary>
 public sealed record ProfileMessage(PlayerProfile Profile) : PeerMessage;

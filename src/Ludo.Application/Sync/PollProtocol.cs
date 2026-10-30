@@ -9,6 +9,7 @@ namespace Ludo.Application.Sync;
 /// Notifications with answer buttons, for making a decision together. A notification goes only to the members
 /// its sender picked, and each answer goes to the sender and the other recipients over the mesh, so nobody else
 /// ever hears about it. Answers can be changed; links keep their order, so every peer ends up with the latest one.
+/// The sender can take a notification back, which removes it for everyone involved.
 /// </summary>
 internal sealed class PollProtocol(SessionContext context)
 {
@@ -65,6 +66,24 @@ internal sealed class PollProtocol(SessionContext context)
         }
     }
 
+    public void RetractLocal(Guid pollId)
+    {
+        RequireLobby();
+        var poll = context.Polls.Find(p => p.Id == pollId)
+            ?? throw new SessionException("That group decision is gone.");
+        if (poll.Sender != context.LocalId)
+        {
+            throw new SessionException("Only the person who sent it can take it back.");
+        }
+
+        Forget(poll);
+        var message = new PollRetractMessage(poll.Id);
+        foreach (var recipient in poll.Recipients.Where(IsConnected))
+        {
+            context.Network.Send(recipient, message);
+        }
+    }
+
     public DispatchResult OnPoll(PlayerId from, PollMessage message)
     {
         if (context.Stage != SessionStage.Lobby || !IsConnected(from)
@@ -116,6 +135,26 @@ internal sealed class PollProtocol(SessionContext context)
         return DispatchResult.Handled;
     }
 
+    public DispatchResult OnRetract(PlayerId from, PollRetractMessage retract)
+    {
+        // Links keep their order, so this can never overtake the notification from the same sender.
+        if (context.Stage != SessionStage.Lobby || !IsConnected(from)
+            || context.Polls.Find(p => p.Id == retract.PollId) is not { } poll || poll.Sender != from)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        Forget(poll);
+        context.Presenter.PresentPollActivity(new PollActivityView(
+            poll.Id,
+            SessionContext.KeyOf(from),
+            context.NameOf(from),
+            poll.Question,
+            IsNew: false,
+            IsRetracted: true));
+        return DispatchResult.Handled;
+    }
+
     /// <summary>Remembers the name of someone leaving, which the lobby forgets, so their answer stays readable.</summary>
     public void OnPeerGone(PlayerId peer)
     {
@@ -123,6 +162,13 @@ internal sealed class PollProtocol(SessionContext context)
         {
             poll.GoneNames.TryAdd(peer, context.NameOf(peer));
         }
+    }
+
+    /// <summary>Drops a notification for good; answers still on their way to us are ignored, not parked.</summary>
+    private void Forget(PollState poll)
+    {
+        context.Polls.Remove(poll);
+        context.PastPolls.Add(poll.Id);
     }
 
     /// <summary>Trimmed, distinct button labels, or null if they break the limits.</summary>

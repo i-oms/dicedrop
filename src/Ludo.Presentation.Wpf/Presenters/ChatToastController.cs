@@ -49,7 +49,7 @@ internal sealed class ChatToastController
 
         var person = _personOf(activity.FromKey);
         Show(
-            new ToastLine(PersonViewModel.InitialsOf(activity.From), person?.Color, person?.Photo, $"{activity.From} · voted", activity.Text),
+            new ToastLine(PersonViewModel.InitialsOf(activity.From), person?.Color, person?.Photo, $"{activity.From} · {(activity.IsRetracted ? "took back" : "voted")}", activity.Text),
             conversation: string.Empty);
     }
 

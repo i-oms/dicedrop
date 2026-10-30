@@ -115,9 +115,10 @@ public sealed record PollView(
 /// <param name="Choice">Index into <see cref="PollView.Options"/>; null until they answer.</param>
 public sealed record PollMemberView(string Key, string Name, bool IsLocal, bool IsPresent, int? Choice);
 
-/// <summary>Someone sent us a notification, or answered one we are part of.</summary>
+/// <summary>Someone sent us a notification, answered one we are part of, or took one back.</summary>
 /// <param name="Text">The question, or for an answer the chosen button and the question.</param>
-public sealed record PollActivityView(Guid PollId, string FromKey, string From, string Text, bool IsNew);
+/// <param name="IsRetracted">The sender took it back, so it is already gone from the list.</param>
+public sealed record PollActivityView(Guid PollId, string FromKey, string From, string Text, bool IsNew, bool IsRetracted = false);
 
 /// <summary>Someone in the lobby asked who wants to play.</summary>
 public sealed record InviteView(Guid MatchId, string From, string GameName);

@@ -53,7 +53,9 @@ public sealed class PollCardViewModel : ObservableObject
         Sender = sender;
         Question = poll.Question;
         Title = poll.IsMine ? "You asked" : $"{poll.From} asks";
+        IsMine = poll.IsMine;
         VoteCommand = new AsyncCommand(option => app.VotePoll.ExecuteAsync(Id, (int)option!), onError);
+        TakeBackCommand = new AsyncCommand(_ => app.RetractPoll.ExecuteAsync(Id), onError);
     }
 
     public Guid Id { get; }
@@ -64,7 +66,12 @@ public sealed class PollCardViewModel : ObservableObject
 
     public string Question { get; }
 
+    /// <summary>We sent it, so we can take it back from everyone.</summary>
+    public bool IsMine { get; }
+
     public ICommand VoteCommand { get; }
+
+    public ICommand TakeBackCommand { get; }
 
     public IReadOnlyList<PollOptionItem> Options
     {
@@ -132,7 +139,8 @@ public sealed class PollCardViewModel : ObservableObject
 
 /// <summary>
 /// Notifications with answer buttons: writing one for the people picked, and the list of those sent and
-/// received, where everyone involved sees each answer. Clearing a card only hides it on this PC.
+/// received, where everyone involved sees each answer. Clearing a card only hides it on this PC; its sender
+/// can also take it back, which removes it for everyone.
 /// </summary>
 public sealed class NotificationsViewModel : ObservableObject
 {

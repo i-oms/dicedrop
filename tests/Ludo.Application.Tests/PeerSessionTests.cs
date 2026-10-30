@@ -691,6 +691,47 @@ public sealed class PeerSessionTests
     }
 
     [Fact]
+    public async Task Only_the_sender_can_take_a_notification_back_and_it_goes_for_everyone()
+    {
+        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var ids = peers.Select(p => SessionContext.FindByKey(p.Latest.LocalKey)!.Value).ToArray();
+            await peers[0].App.SendPoll.ExecuteAsync("Pizza tonight?", ["Yes", "No"], [peers[1].Latest.LocalKey, peers[2].Latest.LocalKey]);
+            await WaitUntil(() => peers.All(p => p.Latest.Polls.Count == 1), "notification did not arrive");
+            var id = peers[0].Latest.Polls.Single().Id;
+            await peers[1].App.VotePoll.ExecuteAsync(id, 0);
+            await WaitUntil(
+                () => peers.All(p => p.Latest.Polls.Single().Recipients.Single(r => r.Name == "P1").Choice == 0),
+                "answer did not arrive");
+
+            // A recipient cannot take it back, here or over the wire.
+            await Assert.ThrowsAsync<SessionException>(() => peers[1].App.RetractPoll.ExecuteAsync(id));
+            networks[2].Inject(ids[1], new PollRetractMessage(id));
+            await peers[2].App.UpdateProfile.ExecuteAsync(1, null);
+            Assert.Single(peers[2].Latest.Polls);
+
+            await peers[0].App.RetractPoll.ExecuteAsync(id);
+            Assert.Empty(peers[0].Latest.Polls);
+            await WaitUntil(() => peers.All(p => p.Latest.Polls.Count == 0), "notification was not taken back");
+            Assert.Contains(peers[2].PollActivity, a => a.IsRetracted && a.From == "P0" && a.Text == "Pizza tonight?");
+
+            // It cannot be answered any more, and nothing still on its way brings it back.
+            await Assert.ThrowsAsync<SessionException>(() => peers[1].App.VotePoll.ExecuteAsync(id, 1));
+            networks[2].Inject(ids[0], new PollMessage(id, "Pizza tonight?", ["Yes", "No"], [ids[1], ids[2]]));
+            networks[2].Inject(ids[1], new PollVoteMessage(id, 1));
+            await peers[2].App.UpdateProfile.ExecuteAsync(2, null);
+            Assert.Empty(peers[2].Latest.Polls);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
     public async Task A_notification_breaking_the_limits_is_refused_before_it_is_sent()
     {
         var peers = Enumerable.Range(0, 2).Select(i => new TestPeer($"P{i}")).ToArray();
