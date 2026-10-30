@@ -7,7 +7,7 @@ using Ludo.Presentation.Wpf.Views;
 namespace Ludo.Presentation.Wpf.Presenters;
 
 /// <summary>
-/// Shows other players' chat lines, nudges, game invites and notifications in a corner pop-up while the main window is
+/// Shows other players' chat lines, nudges, game invites and answers to notifications in a corner pop-up while the main window is
 /// minimised, hidden in the tray or behind other windows. Bringing the game back to the front dismisses it;
 /// clicking it opens the conversation the latest line belongs to.
 /// </summary>
@@ -41,9 +41,15 @@ internal sealed class ChatToastController
 
     private void OnPollActivity(PollActivityView activity)
     {
+        // A new notification gets its own alert, with the buttons; see PollAlertController.
+        if (activity.IsNew)
+        {
+            return;
+        }
+
         var person = _personOf(activity.FromKey);
         Show(
-            new ToastLine(PersonViewModel.InitialsOf(activity.From), person?.Color, person?.Photo, $"{activity.From} · {(activity.IsNew ? "notification" : "answered")}", activity.Text),
+            new ToastLine(PersonViewModel.InitialsOf(activity.From), person?.Color, person?.Photo, $"{activity.From} · answered", activity.Text),
             conversation: string.Empty);
     }
 

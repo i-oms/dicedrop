@@ -21,6 +21,7 @@ public partial class App : System.Windows.Application
     private UdpLobbyDiscovery? _discovery;
     private LudoApplication? _app;
     private ChatToastController? _chatToasts;
+    private PollAlertController? _pollAlerts;
     private NudgeController? _nudges;
     private QuickMessageWindow? _quickMessage;
     private SingleInstance? _instance;
@@ -82,6 +83,11 @@ public partial class App : System.Windows.Application
             () => viewModel.Settings.Saved,
             viewModel.Lobby.FindPerson,
             viewModel.OpenConversation);
+        _pollAlerts = new PollAlertController(
+            window,
+            viewModel.Lobby.Notifications,
+            () => viewModel.Settings.Saved,
+            viewModel.BackToLobby);
         _nudges = new NudgeController(window, presenter, () => viewModel.Settings.Saved);
         _instance.Listen(
             () => Dispatcher.BeginInvoke(window.BringToFront),

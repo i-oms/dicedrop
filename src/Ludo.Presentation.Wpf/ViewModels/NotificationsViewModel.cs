@@ -185,6 +185,12 @@ public sealed class NotificationsViewModel : ObservableObject
             onError);
     }
 
+    /// <summary>A notification just arrived that waits for our answer.</summary>
+    public event Action<PollCardViewModel>? AnswerNeeded;
+
+    /// <summary>The list or an answer on it changed.</summary>
+    public event Action? CardsChanged;
+
     /// <summary>Newest first.</summary>
     public ObservableCollection<PollCardViewModel> Cards { get; } = [];
 
@@ -246,6 +252,7 @@ public sealed class NotificationsViewModel : ObservableObject
             Cards.Remove(gone);
         }
 
+        var added = new List<PollCardViewModel>();
         foreach (var poll in current.Values)
         {
             var card = Cards.FirstOrDefault(c => c.Id == poll.Id);
@@ -253,12 +260,17 @@ public sealed class NotificationsViewModel : ObservableObject
             {
                 card = new PollCardViewModel(poll, personOf(poll.FromKey, poll.From), _app, _onError);
                 Cards.Insert(0, card);
+                added.Add(card);
             }
 
             card.Update(poll);
         }
 
         RefreshPending();
+        foreach (var card in added.Where(c => c.NeedsAnswer))
+        {
+            AnswerNeeded?.Invoke(card);
+        }
     }
 
     private void StartComposing()
@@ -300,7 +312,11 @@ public sealed class NotificationsViewModel : ObservableObject
         _removeOptionCommand.RaiseCanExecuteChanged();
     }
 
-    private void RefreshPending() => PendingCount = Cards.Count(c => c.NeedsAnswer);
+    private void RefreshPending()
+    {
+        PendingCount = Cards.Count(c => c.NeedsAnswer);
+        CardsChanged?.Invoke();
+    }
 
     private bool CanSend() =>
         IsComposing

@@ -148,7 +148,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private void BackToLobby()
+    internal void BackToLobby()
     {
         _viewing = null;
         Refresh();
