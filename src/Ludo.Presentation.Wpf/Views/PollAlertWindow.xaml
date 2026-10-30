@@ -3,7 +3,7 @@
                           xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                           xmlns:security="clr-namespace:Ludo.Presentation.Wpf.Security"
                           xmlns:views="clr-namespace:Ludo.Presentation.Wpf.Views"
-                          Title="DiceDrop notification"
+                          Title="DiceDrop group decision"
                           WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
                           ShowActivated="False" SizeToContent="WidthAndHeight" WindowStartupLocation="Manual"
                           Background="#2A2619" BorderBrush="{StaticResource Accent}" BorderThickness="2">
@@ -13,7 +13,7 @@
             <StackPanel Orientation="Horizontal">
                 <Path Width="16" Height="16" Stretch="Uniform" Data="{StaticResource NudgeIcon}" Fill="{StaticResource AccentText}"
                       Margin="0,0,8,0" VerticalAlignment="Center" />
-                <TextBlock Text="DiceDrop · your answer is needed" FontSize="13" FontWeight="Bold"
+                <TextBlock Text="DiceDrop · group decision · your vote is needed" FontSize="13" FontWeight="Bold"
                            Foreground="{StaticResource AccentText}" VerticalAlignment="Center" />
             </StackPanel>
         </Border>

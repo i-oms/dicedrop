@@ -7,7 +7,7 @@
         <DockPanel>
             <Button DockPanel.Dock="Right" Style="{StaticResource SecondaryButton}" Content="New" Padding="12,4" FontSize="12"
                     VerticalAlignment="Center" Command="{Binding ComposeCommand}" />
-            <TextBlock Text="Notifications" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <TextBlock Text="Group Decisions" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
             <Border Background="{StaticResource Accent}" CornerRadius="9" MinWidth="18" Height="18" Padding="5,0" Margin="8,0,0,0"
                     HorizontalAlignment="Left" VerticalAlignment="Center">
                 <Border.Visibility>
@@ -18,35 +18,35 @@
             </Border>
         </DockPanel>
         <TextBlock Style="{StaticResource Muted}" FontSize="12" Margin="0,2,0,14" TextWrapping="Wrap"
-                   Text="Ask the people you pick. Everyone asked sees every answer." />
+                   Text="Ask the people you pick. Everyone asked sees every vote." />
 
         <!-- Writing a new one. -->
         <Border CornerRadius="14" Padding="16" Background="{StaticResource SurfaceRaised}" BorderBrush="{StaticResource Accent}"
                 BorderThickness="1" Margin="0,0,0,14" views:Motion.Enter="True"
                 Visibility="{Binding IsComposing, Converter={StaticResource BoolToVisibility}}">
             <StackPanel>
-                <TextBlock Style="{StaticResource Overline}" Text="ASK" />
+                <TextBlock Style="{StaticResource Overline}" Text="QUESTION" />
                 <TextBox Text="{Binding Question, UpdateSourceTrigger=PropertyChanged}" MaxLength="{Binding MaxQuestionLength, Mode=OneTime}"
                          Tag="What should we decide?" TextWrapping="Wrap" FontSize="13" />
 
-                <TextBlock Style="{StaticResource Overline}" Text="BUTTONS" />
+                <TextBlock Style="{StaticResource Overline}" Text="ANSWERS" />
                 <ItemsControl ItemsSource="{Binding OptionFields}" Margin="0,4,0,0">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <DockPanel Margin="0,0,0,6">
                                 <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Margin="4,0,0,0" VerticalAlignment="Center"
                                         Command="{Binding DataContext.RemoveOptionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}" AutomationProperties.Name="Remove button">
+                                        CommandParameter="{Binding}" AutomationProperties.Name="Remove answer">
                                     <Path Width="12" Height="12" Stretch="Uniform" Data="{StaticResource CloseIcon}"
                                           Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                                 </Button>
                                 <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" MaxLength="{Binding MaxLength, Mode=OneTime}"
-                                         Tag="Button text" Margin="0" FontSize="13" />
+                                         Tag="Answer text" Margin="0" FontSize="13" />
                             </DockPanel>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <Button Style="{StaticResource SecondaryButton}" Content="Add a button" Padding="10,4" FontSize="12" HorizontalAlignment="Left"
+                <Button Style="{StaticResource SecondaryButton}" Content="Add an answer" Padding="10,4" FontSize="12" HorizontalAlignment="Left"
                         Margin="0,0,0,12" Command="{Binding AddOptionCommand}" />
 
                 <TextBlock Style="{StaticResource Overline}" Text="SEND TO" />
@@ -91,7 +91,7 @@
                             <DockPanel>
                                 <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" VerticalAlignment="Top" Margin="4,0,0,0"
                                         Command="{Binding DataContext.ClearCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}" AutomationProperties.Name="Clear notification">
+                                        CommandParameter="{Binding}" AutomationProperties.Name="Clear group decision">
                                     <Path Width="12" Height="12" Stretch="Uniform" Data="{StaticResource CloseIcon}"
                                           Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                                 </Button>

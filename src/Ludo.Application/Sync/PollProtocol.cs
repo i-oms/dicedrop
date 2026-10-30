@@ -16,10 +16,10 @@ internal sealed class PollProtocol(SessionContext context)
     {
         RequireLobby();
         var text = SessionContext.NormalizeChat(question)
-            ?? throw new SessionException($"Notifications must be 1 to {SessionLimits.MaxChatLength} characters.");
+            ?? throw new SessionException($"Group decisions must be 1 to {SessionLimits.MaxChatLength} characters.");
         var labels = NormalizeOptions(options)
             ?? throw new SessionException(
-                $"Add {SessionLimits.MinPollOptions} to {SessionLimits.MaxPollOptions} different buttons of up to {SessionLimits.MaxPollOptionLength} characters.");
+                $"Add {SessionLimits.MinPollOptions} to {SessionLimits.MaxPollOptions} different answers of up to {SessionLimits.MaxPollOptionLength} characters.");
 
         var recipients = recipientKeys.Distinct().Select(RequirePeer).ToArray();
         if (recipients.Length == 0)
@@ -41,10 +41,10 @@ internal sealed class PollProtocol(SessionContext context)
     {
         RequireLobby();
         var poll = context.Polls.Find(p => p.Id == pollId)
-            ?? throw new SessionException("That notification is gone.");
+            ?? throw new SessionException("That group decision is gone.");
         if (!poll.Recipients.Contains(context.LocalId))
         {
-            throw new SessionException("Only the people it was sent to can answer.");
+            throw new SessionException("Only the people it was sent to can vote.");
         }
 
         if (option < 0 || option >= poll.Options.Count)

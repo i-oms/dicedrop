@@ -47,7 +47,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (activity.IsNew && CurrentScreen == Game)
             {
-                Notice = $"{activity.From} sent you a notification. Go back to the lobby to answer it.";
+                Notice = $"{activity.From} started a group decision. Go back to the lobby to vote.";
             }
         };
 

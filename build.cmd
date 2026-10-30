@@ -22,6 +22,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem A running copy locks the exe. Ask it to quit so peers hear it left, and kill it if it is still there after 5 seconds.
+echo Stopping any running DiceDrop
+powershell -NoProfile -Command "$running = Get-Process DiceDrop -ErrorAction SilentlyContinue; if ($running) { try { [void][Threading.EventWaitHandle]::OpenExisting('Local\DiceDrop.Quit.7E3C1B52').Set() } catch {}; $running | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue; Get-Process DiceDrop -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 500 }"
+
 dotnet publish "%ROOT%src\Ludo.Presentation.Wpf\Ludo.Presentation.Wpf.csproj" -c Release -o "%OUTPUT%" -p:Version=%VERSION%
 if errorlevel 1 (
     echo Publish failed. 1>&2
@@ -29,3 +33,7 @@ if errorlevel 1 (
 )
 
 dir /b "%OUTPUT%"
+
+rem Not with start: the game would inherit this console's output, so a piped build would wait until it is closed.
+echo Starting DiceDrop
+powershell -NoProfile -Command "Start-Process -FilePath (Join-Path $env:OUTPUT 'DiceDrop.exe')"

@@ -96,7 +96,7 @@
                     <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding ChatPopups}" Margin="0,6">
                         <StackPanel>
                             <TextBlock Text="Chat pop-ups" />
-                            <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="Show new messages and notifications in the corner while DiceDrop is in the background." TextWrapping="Wrap" />
+                            <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="Show new messages and group decisions in the corner while DiceDrop is in the background." TextWrapping="Wrap" />
                         </StackPanel>
                     </CheckBox>
                     <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding NudgeSound}" Margin="0,6">

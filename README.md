@@ -46,7 +46,7 @@
 - **Fair dice with no trusted roller.** Every player commits to a secret hash chain before the first roll, and each die is `SHA-256(roll ‖ all reveals) mod 6 + 1`. Nobody can steer or predict a roll.
 - **Spectating.** Not playing? Watch live. Leave a game and keep watching. Late joiners replay the full history.
 - **Built-in messenger.** Lobby group chat, private chats, and **Nudge** (shakes the other player's window and plays a sound).
-- **Notifications.** Ask the people you pick a question with your own answer buttons, like **Yes** and **No**. Everyone asked sees every answer, so you can decide together.
+- **Group Decisions.** Ask the people you pick a question with your own answers, like **Yes** and **No**. It stays on their screen until they vote, and everyone asked sees every vote, so you can decide together.
 - **Capture-proof window.** `WDA_EXCLUDEFROMCAPTURE` keeps the game out of PrintScreen, Snipping Tool, OBS and Teams/Zoom/Discord screen sharing.
 - **Portable and private.** One self-contained EXE of about 66 MB with no .NET install needed. Settings live in `%APPDATA%\DiceDrop\settings.json`, and the registry is touched only if you turn on **Start with Windows**.
 - **Update notices.** Checks GitHub releases at startup and every 6 hours, then shows a banner. It never downloads or installs anything by itself. To update, just open the new EXE: it closes the running copy and takes over.
@@ -95,7 +95,7 @@ Most of the time the cause is a Windows Firewall **BLOCK** rule that was created
 Requires Windows and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bat
-build.cmd                 :: runs all tests, then writes dist\DiceDrop.exe (self-contained)
+build.cmd                 :: runs all tests, stops any running DiceDrop, writes dist\DiceDrop.exe (self-contained) and starts it
 build.cmd D:\out          :: same, into another folder
 ```
 
