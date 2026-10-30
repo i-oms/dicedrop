@@ -49,7 +49,7 @@
 - **Notifications.** Ask the people you pick a question with your own answer buttons, like **Yes** and **No**. Everyone asked sees every answer, so you can decide together.
 - **Capture-proof window.** `WDA_EXCLUDEFROMCAPTURE` keeps the game out of PrintScreen, Snipping Tool, OBS and Teams/Zoom/Discord screen sharing.
 - **Portable and private.** One self-contained EXE of about 66 MB with no .NET install needed. Settings live in `%APPDATA%\DiceDrop\settings.json`, and the registry is touched only if you turn on **Start with Windows**.
-- **Update notices.** Checks GitHub releases at startup and every 6 hours, then shows a banner. It never downloads or installs anything by itself.
+- **Update notices.** Checks GitHub releases at startup and every 6 hours, then shows a banner. It never downloads or installs anything by itself. To update, just open the new EXE: it closes the running copy and takes over.
 
 ## Quick start
 

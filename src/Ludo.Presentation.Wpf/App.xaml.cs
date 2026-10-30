@@ -83,7 +83,9 @@ public partial class App : System.Windows.Application
             viewModel.Lobby.FindPerson,
             viewModel.OpenConversation);
         _nudges = new NudgeController(window, presenter, () => viewModel.Settings.Saved);
-        _instance.ListenForActivation(() => Dispatcher.BeginInvoke(window.BringToFront));
+        _instance.Listen(
+            () => Dispatcher.BeginInvoke(window.BringToFront),
+            () => Dispatcher.BeginInvoke(() => _tray.Exit()));
         StartupRegistration.RefreshPath();
         MainWindow = window;
 
