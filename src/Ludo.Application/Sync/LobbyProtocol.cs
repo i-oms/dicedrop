@@ -280,7 +280,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
 
     public async Task<DispatchResult> OnJoinRejectedAsync(PlayerId from, JoinRejectedMessage rejected)
     {
-        if (context.Stage != SessionStage.Lobby || from != context.HostId)
+        if (context.Stage != SessionStage.Lobby || from != context.HostId || IsSeatedInRunningGame)
         {
             return DispatchResult.Ignored;
         }
@@ -292,7 +292,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
 
     public async Task<DispatchResult> OnLobbyClosedAsync(PlayerId from)
     {
-        if (context.Stage != SessionStage.Lobby || from != context.HostId)
+        if (context.Stage != SessionStage.Lobby || from != context.HostId || IsSeatedInRunningGame)
         {
             return DispatchResult.Ignored;
         }
@@ -416,6 +416,9 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             BroadcastRoster();
         }
     }
+
+    /// <summary>The host has no say in a game: if it really goes away, the lost link hands the lobby over and play goes on.</summary>
+    private bool IsSeatedInRunningGame => context.Match is { Phase: MatchPhase.Playing, IsPlaying: true };
 
     private PlayerId RequirePeer(string key) =>
         SessionContext.FindByKey(key) is { } id && id != context.LocalId

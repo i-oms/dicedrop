@@ -270,10 +270,12 @@ internal sealed class SessionContext(
     /// <summary>
     /// Initiator side: every member we are connected to holds our open invite. Until then a crossing
     /// invite may still be winning on some peer, and starting would seat players who no longer follow us.
+    /// A crossing invite arrives well within the grace period, so a member still silent after it can't stall us.
     /// </summary>
     public bool InviteReachedEveryone() =>
         Match is { Phase: MatchPhase.Inviting } match
-        && Peers.Values.All(p => !p.IsGreeted || match.SeenBy.Contains(p.Id));
+        && (match.SeenGraceOver
+            || Peers.Values.All(p => !p.IsGreeted || match.SeenBy.Contains(p.Id)));
 
     /// <summary>Sends to every other player still in the current match.</summary>
     public void SendToPlayers(PeerMessage message)

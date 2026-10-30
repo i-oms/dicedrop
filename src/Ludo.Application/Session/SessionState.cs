@@ -109,6 +109,9 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
     /// <summary>Initiator side: members who told us this invite is the one they hold.</summary>
     public HashSet<PlayerId> SeenBy { get; } = [];
 
+    /// <summary>Initiator side: members who have not told us they hold the invite no longer block the start.</summary>
+    public bool SeenGraceOver { get; set; }
+
     /// <summary>Our dice commitment for this match, while we have said yes.</summary>
     public HashChain? Chain { get; set; }
 

@@ -14,10 +14,15 @@ namespace Ludo.Application.Sync;
 /// and keeps everyone who is not playing (spectators, and players who left) up to date with its record
 /// of the match. One match runs at a time: if two invites cross, the one with the lower id wins everywhere,
 /// and a running game beats any invite. The initiator only starts once every member has confirmed it holds
-/// the invite, so a crossing invite can never take players away from a game that has already begun.
+/// the invite, so a crossing invite can never take players away from a game that has already begun. A member
+/// that stays silent past a short grace period no longer holds up the start.
 /// </summary>
-internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gameplay)
+internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gameplay, SessionExecutor executor)
 {
+    private static readonly TimeSpan InviteSeenGrace = TimeSpan.FromSeconds(5);
+
+    private ITimer? _inviteSeenTimer;
+
     /// <param name="inviteeKeys">Members who may join; null or empty invites everyone in the lobby.</param>
     public void ProposeLocal(string gameId, IReadOnlyCollection<string>? inviteeKeys)
     {
@@ -55,6 +60,9 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         var match = new MatchState(Guid.NewGuid(), context.LocalId, game.Id, invitees) { Chain = HashChain.Create(context.Crypto) };
         match.Replies[context.LocalId] = new MatchReply(true, match.Chain.Anchor);
         context.Match = match;
+
+        _inviteSeenTimer?.Dispose();
+        _inviteSeenTimer = context.Time.CreateTimer(_ => executor.Post(() => EndSeenGrace(match)), null, InviteSeenGrace, Timeout.InfiniteTimeSpan);
         context.Network.Broadcast(ProposalOf(match));
         context.AddLog(invitees is null ? $"You asked who wants to play {game.Name}." : $"You invited {string.Join(", ", invitees.Select(context.NameOf))} to {game.Name}.");
     }
@@ -322,15 +330,18 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         var match = Find(replay.MatchId);
         if (match is null)
         {
-            // A game that was already running when we arrived, or one that beat our own invite.
+            // A game that was already running when we arrived, or one that beat our own invite. Only its
+            // initiator, always seat 0, sends these.
+            if (!IsGreeted(from) || replay.Seats.Count == 0 || replay.Seats[0].Id != from)
+            {
+                return DispatchResult.Ignored;
+            }
+
             if (context.Match is { IsActive: true } current)
             {
-                if (current.Phase == MatchPhase.Playing)
-                {
-                    return DispatchResult.Ignored;
-                }
-
-                Supersede(current, "A game is already running, so your invite was withdrawn.");
+                // A replay alone cannot end an open invite, or any member could cancel it. A real game gets
+                // the invite withdrawn through its initiator, and then we can follow it.
+                return current.Phase == MatchPhase.Playing ? DispatchResult.Ignored : DispatchResult.Deferred;
             }
 
             match = new MatchState(replay.MatchId, from, GameCatalog.Find(replay.GameId)?.Id ?? GameCatalog.Ludo.Id, invitees: null);
@@ -543,6 +554,13 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         }
 
         return null;
+    }
+
+    /// <summary>Nothing else may happen at this moment, and the initiator's Start button may need to light up.</summary>
+    private void EndSeenGrace(MatchState match)
+    {
+        match.SeenGraceOver = true;
+        context.Publish();
     }
 
     private void SendReplay(PlayerId peer, MatchState match) =>

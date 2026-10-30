@@ -246,6 +246,93 @@ public sealed class PeerSessionTests
     }
 
     [Fact]
+    public async Task A_host_cannot_boot_a_seated_player_out_of_a_running_game()
+    {
+        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            await StartGameAsync(initiator: peers[1], peers);
+            var host = SessionContext.FindByKey(peers[0].Latest.LocalKey)!.Value;
+
+            networks[2].Inject(host, new LobbyClosedMessage());
+            networks[2].Inject(host, new JoinRejectedMessage("go away"));
+            await peers[1].App.RollDice.ExecuteAsync();
+
+            await WaitUntil(() => peers.All(p => p.Latest.Match?.Game?.RollCount == 1), "the game stalled after the host's messages");
+            Assert.True(peers[2].Latest.Match!.IsPlaying);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task A_forged_replay_cannot_cancel_an_invite_or_pose_as_someone_elses_game()
+    {
+        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var spectator = SessionContext.FindByKey(peers[0].Latest.LocalKey)!.Value;
+            var other = SessionContext.FindByKey(peers[1].Latest.LocalKey)!.Value;
+
+            // Idle: a replay whose seat 0 is not its sender is not that sender's game to show.
+            networks[2].Inject(spectator, ReplayWithFirstSeat(other));
+            await Task.Delay(200);
+            Assert.Null(peers[2].Latest.Match);
+
+            await peers[1].App.ProposeGame.ExecuteAsync();
+            await WaitUntil(() => peers.All(p => p.Latest.Match?.Phase == MatchPhaseView.Inviting), "invite did not reach everyone");
+            var inviteId = peers[1].Latest.Match!.Id;
+
+            networks[2].Inject(spectator, ReplayWithFirstSeat(spectator));
+            await Task.Delay(200);
+
+            Assert.All(peers, p => Assert.Equal(inviteId, p.Latest.Match!.Id));
+            Assert.All(peers, p => Assert.Equal(MatchPhaseView.Inviting, p.Latest.Match!.Phase));
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task A_member_who_never_confirms_the_invite_only_delays_the_start_briefly()
+    {
+        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            networks[1].Mute(SessionContext.FindByKey(peers[2].Latest.LocalKey)!.Value);
+
+            await peers[1].App.ProposeGame.ExecuteAsync();
+            await WaitUntil(() => peers[0].Latest.Match?.Phase == MatchPhaseView.Inviting, "invite did not reach P0");
+            await peers[0].App.AcceptInvite.ExecuteAsync();
+            await WaitUntil(
+                () => peers[1].Latest.Match!.Invitees.Any(i => i.Name == "P0" && i.Answer == InviteAnswer.Accepted),
+                "the answer never arrived");
+            Assert.False(peers[1].Latest.Match!.CanStart);
+
+            await WaitUntil(() => peers[1].Latest.Match!.CanStart, "the silent member still blocks the start");
+            await peers[1].App.StartGame.ExecuteAsync();
+            await WaitUntil(() => peers[1].Latest.Match is { IsPlaying: true, Game: not null }, "the game did not start");
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    private static MatchReplayMessage ReplayWithFirstSeat(Ludo.Domain.Players.PlayerId seat) =>
+        new(Guid.NewGuid(), GameCatalog.Ludo.Id, Ludo.Domain.Gameplay.GameRules.Classic, [new SeatAssignment(seat, "Fake", new byte[32])], []);
+
+    [Fact]
     public async Task Crossing_invites_settle_on_one()
     {
         var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
@@ -658,6 +745,10 @@ public sealed class PeerSessionTests
         private EventHandler<IncomingMessage>? _received;
 
         private readonly HashSet<Ludo.Domain.Players.PlayerId> _muted = [];
+
+        /// <summary>Delivers a message as if the peer had sent it, the way a modified client could.</summary>
+        public void Inject(Ludo.Domain.Players.PlayerId from, PeerMessage message) =>
+            _received?.Invoke(this, new IncomingMessage(from, message));
 
         public void Mute(Ludo.Domain.Players.PlayerId peer)
         {

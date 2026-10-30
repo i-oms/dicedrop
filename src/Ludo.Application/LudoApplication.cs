@@ -24,7 +24,7 @@ public sealed class LudoApplication : IAsyncDisposable
         _executor = new SessionExecutor(ex => presenter.PresentNotice($"Unexpected error: {ex.Message}"));
         var context = new SessionContext(network, discovery, crypto, presenter, time);
         var gameplay = new GameplayProtocol(context);
-        var matches = new MatchProtocol(context, gameplay);
+        var matches = new MatchProtocol(context, gameplay, _executor);
         var lobby = new LobbyProtocol(context, matches);
         var router = new PeerMessageRouter(context, _executor, lobby, matches, gameplay);
 
