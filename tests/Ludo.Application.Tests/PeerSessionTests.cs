@@ -174,6 +174,78 @@ public sealed class PeerSessionTests
     }
 
     [Fact]
+    public async Task An_invite_sent_while_a_game_runs_does_not_disturb_it()
+    {
+        var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
+        var latecomer = new TestPeer("Late");
+        try
+        {
+            var port = await FormLobbyAsync(peers);
+            await StartGameAsync(initiator: peers[1], peers);
+            var gameId = peers[1].Latest.Match!.Id;
+
+            // Fire an invite the moment we are in, before the running game has reached us.
+            await latecomer.App.JoinLobby.ExecuteAsync(latecomer.Name, "127.0.0.1", port);
+            await WaitUntil(() => latecomer.Latest.Members.Count >= 2, "latecomer never got the member list");
+            try
+            {
+                await latecomer.App.ProposeGame.ExecuteAsync();
+            }
+            catch (SessionException)
+            {
+                // The running game got here first, which is fine too.
+            }
+
+            await WaitUntil(
+                () => latecomer.Latest.Match is { Phase: MatchPhaseView.Playing, IsPlaying: false } m && m.Id == gameId,
+                "latecomer never ended up watching the running game");
+            Assert.All(peers, p => Assert.Equal(gameId, p.Latest.Match!.Id));
+            Assert.All(peers, p => Assert.True(p.Latest.Match!.IsPlaying));
+            Assert.False(latecomer.Latest.CanProposeGame);
+
+            await peers[1].App.RollDice.ExecuteAsync();
+            await WaitUntil(
+                () => peers.Append(latecomer).All(p => p.Latest.Match?.Game?.RollCount == 1),
+                "the game stalled after the stray invite");
+        }
+        finally
+        {
+            await latecomer.App.DisposeAsync();
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task An_invite_its_rival_cannot_hear_is_withdrawn_instead_of_waiting_forever()
+    {
+        // P1 and P2 never hear each other's games, so only P0 sees both invites and must sort them out.
+        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var p1 = SessionContext.FindByKey(peers[1].Latest.LocalKey)!.Value;
+            var p2 = SessionContext.FindByKey(peers[2].Latest.LocalKey)!.Value;
+            networks[1].Mute(p2);
+            networks[2].Mute(p1);
+
+            await peers[1].App.ProposeGame.ExecuteAsync();
+            await WaitUntil(() => peers[0].Latest.Match?.Phase == MatchPhaseView.Inviting, "P0 never got the first invite");
+            await peers[2].App.ProposeGame.ExecuteAsync();
+
+            // Whichever invite wins at P0, the loser's initiator must drop its own rather than wait on it.
+            await WaitUntil(
+                () => peers[0].Latest.Match is { Phase: MatchPhaseView.Inviting } winner
+                    && peers.Skip(1).All(p => p.Latest.Match is { } m && (m.Id == winner.Id || m.Phase == MatchPhaseView.Stopped)),
+                "the losing invite was left waiting");
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
     public async Task Crossing_invites_settle_on_one()
     {
         var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
@@ -514,11 +586,11 @@ public sealed class PeerSessionTests
     {
         private volatile SessionSnapshot _latest = SessionSnapshot.Empty;
 
-        public TestPeer(string name, ILobbyDiscovery? discovery = null)
+        public TestPeer(string name, ILobbyDiscovery? discovery = null, IPeerNetwork? network = null)
         {
             Name = name;
             App = new LudoApplication(
-                new TcpPeerNetwork(),
+                network ?? new TcpPeerNetwork(),
                 discovery ?? new NullDiscovery(),
                 new Sha256CryptoProvider(),
                 this,
@@ -577,6 +649,81 @@ public sealed class PeerSessionTests
 
                 await Task.Delay(1, cancellation);
             }
+        }
+    }
+
+    /// <summary>Drops game messages from chosen peers, as if their link only carried the lobby.</summary>
+    private sealed class FilteredNetwork(IPeerNetwork inner) : IPeerNetwork
+    {
+        private EventHandler<IncomingMessage>? _received;
+
+        private readonly HashSet<Ludo.Domain.Players.PlayerId> _muted = [];
+
+        public void Mute(Ludo.Domain.Players.PlayerId peer)
+        {
+            lock (_muted)
+            {
+                _muted.Add(peer);
+            }
+        }
+
+        public event EventHandler<PeerConnection>? PeerConnected
+        {
+            add => inner.PeerConnected += value;
+            remove => inner.PeerConnected -= value;
+        }
+
+        public event EventHandler<Ludo.Domain.Players.PlayerId>? PeerDisconnected
+        {
+            add => inner.PeerDisconnected += value;
+            remove => inner.PeerDisconnected -= value;
+        }
+
+        public event EventHandler<IncomingMessage>? MessageReceived
+        {
+            add
+            {
+                if (_received is null)
+                {
+                    inner.MessageReceived += OnReceived;
+                }
+
+                _received += value;
+            }
+            remove => _received -= value;
+        }
+
+        public int ListenPort => inner.ListenPort;
+
+        public Task StartAsync(Ludo.Domain.Players.PlayerId localId, int port, CancellationToken cancellationToken = default) =>
+            inner.StartAsync(localId, port, cancellationToken);
+
+        public Task<Ludo.Domain.Players.PlayerId> ConnectAsync(string host, int port, CancellationToken cancellationToken = default) =>
+            inner.ConnectAsync(host, port, cancellationToken);
+
+        public void Send(Ludo.Domain.Players.PlayerId peer, PeerMessage message) => inner.Send(peer, message);
+
+        public void Broadcast(PeerMessage message) => inner.Broadcast(message);
+
+        public void Disconnect(Ludo.Domain.Players.PlayerId peer) => inner.Disconnect(peer);
+
+        public Task StopAsync() => inner.StopAsync();
+
+        public IReadOnlyList<string> GetLocalAddresses() => inner.GetLocalAddresses();
+
+        private void OnReceived(object? sender, IncomingMessage incoming)
+        {
+            var isMatch = incoming.Message.GetType().Name.StartsWith("Match", StringComparison.Ordinal)
+                || incoming.Message is GameStartMessage;
+            lock (_muted)
+            {
+                if (isMatch && _muted.Contains(incoming.From))
+                {
+                    return;
+                }
+            }
+
+            _received?.Invoke(sender, incoming);
         }
     }
 

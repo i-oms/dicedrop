@@ -5,7 +5,7 @@ namespace Ludo.Application.Protocol;
 
 public static class ProtocolInfo
 {
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>
     /// Port a host listens on when it can. Peers never depend on it: if it is taken, the host falls back
@@ -55,6 +55,18 @@ public sealed record ProfileMessage(PlayerProfile Profile) : PeerMessage;
 /// Everyone else hears about it too, so they can watch.
 /// </summary>
 public sealed record MatchProposalMessage(Guid MatchId, byte[] ChainAnchor, string GameId, IReadOnlyList<PlayerId>? Invitees) : PeerMessage;
+
+/// <summary>
+/// Any member to the initiator: this invite is now the one I hold. The initiator starts only once every
+/// member has sent it, so no crossing invite can still be winning on some peer when the game begins.
+/// </summary>
+public sealed record MatchSeenMessage(Guid MatchId) : PeerMessage;
+
+/// <summary>
+/// Any member to an initiator: I hold a game that beats your invite (a running game, or a crossing invite
+/// with a lower id), so it can never start. Reaches initiators that cannot hear the winning one themselves.
+/// </summary>
+public sealed record MatchOutrankedMessage(Guid MatchId) : PeerMessage;
 
 /// <summary>Invited member to everyone: in or out. Players who accept commit to a fresh dice chain.</summary>
 public sealed record MatchReplyMessage(Guid MatchId, bool Accepted, byte[]? ChainAnchor) : PeerMessage;

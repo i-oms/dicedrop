@@ -58,7 +58,8 @@ internal static class SnapshotBuilder
             .Select(r => new MatchMemberView(SessionContext.KeyOf(r.Id), r.Name, r.Id == match.Initiator, r.Id == context.LocalId, AnswerOf(match, r.Id)))
             .ToArray();
         var accepted = context.AcceptedPlayers();
-        var canStart = isInitiator && match.Phase == MatchPhase.Inviting && accepted.Count > 0 && accepted.TrueForAll(p => p.Ready);
+        var canStart = isInitiator && match.Phase == MatchPhase.Inviting && accepted.Count > 0 && accepted.TrueForAll(p => p.Ready)
+            && context.InviteReachedEveryone();
 
         return new MatchView(
             match.Id,

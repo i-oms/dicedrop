@@ -12,7 +12,9 @@ namespace Ludo.Application.Sync;
 /// Games inside the lobby. Any member can ask who wants to play; everyone is invited, and those who say
 /// yes commit to a fresh dice chain. The initiator starts the game with them, can stop it at any time,
 /// and keeps everyone who is not playing (spectators, and players who left) up to date with its record
-/// of the match. One match runs at a time: if two invites cross, the one with the lower id wins everywhere.
+/// of the match. One match runs at a time: if two invites cross, the one with the lower id wins everywhere,
+/// and a running game beats any invite. The initiator only starts once every member has confirmed it holds
+/// the invite, so a crossing invite can never take players away from a game that has already begun.
 /// </summary>
 internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gameplay)
 {
@@ -98,6 +100,11 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
             throw new SessionException("Some players are still connecting to each other.");
         }
 
+        if (!context.InviteReachedEveryone())
+        {
+            throw new SessionException("The invite is still reaching everyone in the lobby.");
+        }
+
         var seats = players
             .Prepend(context.Roster.Find(r => r.Id == context.LocalId) ?? new RosterSeat(context.LocalId, context.LocalName))
             .Take(SessionContext.MaxPlayers)
@@ -152,6 +159,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         {
             if (current.Id == proposal.MatchId)
             {
+                context.Network.Send(from, new MatchSeenMessage(proposal.MatchId));
                 return DispatchResult.Ignored;
             }
 
@@ -159,6 +167,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
             if (current.Phase == MatchPhase.Playing || current.Id.CompareTo(proposal.MatchId) < 0)
             {
                 context.PastMatches.Add(proposal.MatchId);
+                context.Network.Send(from, new MatchOutrankedMessage(proposal.MatchId));
                 if (current.Phase == MatchPhase.Playing && current.Initiator == context.LocalId)
                 {
                     SendReplay(from, current);
@@ -173,6 +182,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         var match = new MatchState(proposal.MatchId, from, game.Id, proposal.Invitees?.ToHashSet());
         match.Replies[from] = new MatchReply(true, proposal.ChainAnchor);
         context.Match = match;
+        context.Network.Send(from, new MatchSeenMessage(match.Id));
         var name = context.NameOf(from);
         if (match.IsInvited(context.LocalId))
         {
@@ -200,6 +210,37 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         }
 
         match.Replies[from] = new MatchReply(reply.Accepted, reply.Accepted ? reply.ChainAnchor : null);
+        match.SeenBy.Add(from);
+        return DispatchResult.Handled;
+    }
+
+    public DispatchResult OnSeen(PlayerId from, MatchSeenMessage seen)
+    {
+        if (Find(seen.MatchId) is not { } match)
+        {
+            return Unknown(seen.MatchId);
+        }
+
+        if (match.Phase != MatchPhase.Inviting || match.Initiator != context.LocalId || !IsGreeted(from))
+        {
+            return DispatchResult.Ignored;
+        }
+
+        match.SeenBy.Add(from);
+        return DispatchResult.Handled;
+    }
+
+    /// <summary>Our invite lost to a game we may not be able to hear ourselves; withdraw it instead of waiting forever.</summary>
+    public DispatchResult OnOutranked(PlayerId from, MatchOutrankedMessage outranked)
+    {
+        if (Find(outranked.MatchId) is not { Phase: MatchPhase.Inviting } match
+            || match.Initiator != context.LocalId || !IsGreeted(from))
+        {
+            return DispatchResult.Ignored;
+        }
+
+        context.Network.Broadcast(new MatchEndMessage(match.Id));
+        context.EndMatch("Another game is already being set up or played in this lobby, so your invite was withdrawn.");
         return DispatchResult.Handled;
     }
 
@@ -207,7 +248,14 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
     {
         if (Find(start.MatchId) is not { } match)
         {
-            return Unknown(start.MatchId);
+            var result = Unknown(start.MatchId);
+            if (result == DispatchResult.Ignored && start.Seats.Any(s => s.Id == context.LocalId))
+            {
+                // A game we gave up on seated us anyway; say we are out, or it would wait for our dice shares forever.
+                context.Network.Broadcast(new MatchLeaveMessage(start.MatchId));
+            }
+
+            return result;
         }
 
         if (from != match.Initiator || match.Phase != MatchPhase.Inviting)
@@ -514,7 +562,14 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         context.PastMatches.Add(current.Id);
         if (current.Initiator == context.LocalId)
         {
+            // Anyone still holding our invite drops it rather than waiting on it.
+            context.Network.Broadcast(new MatchEndMessage(current.Id));
             context.AddLog(ownInviteNotice);
+        }
+        else
+        {
+            // Its initiator may not hear the winner itself; tell it, so it does not start with players who have moved on.
+            context.Network.Send(current.Initiator, new MatchOutrankedMessage(current.Id));
         }
     }
 

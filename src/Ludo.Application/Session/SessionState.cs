@@ -106,6 +106,9 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
     /// <summary>Answers to the invite. The initiator is in from the start.</summary>
     public Dictionary<PlayerId, MatchReply> Replies { get; } = [];
 
+    /// <summary>Initiator side: members who told us this invite is the one they hold.</summary>
+    public HashSet<PlayerId> SeenBy { get; } = [];
+
     /// <summary>Our dice commitment for this match, while we have said yes.</summary>
     public HashChain? Chain { get; set; }
 

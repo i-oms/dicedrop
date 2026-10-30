@@ -22,12 +22,19 @@ public sealed class TcpPeerNetwork(IDiagnosticLog? diagnostics = null) : IPeerNe
     private const int HandshakeBytes = sizeof(int) + 16 + sizeof(int);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Listing the adapters takes tens of milliseconds, and the host asks on every state change, so a long
+    /// game would leave it minutes behind. Addresses rarely change, so a few seconds' staleness is fine.
+    /// </summary>
+    private static readonly TimeSpan AddressCacheLifetime = TimeSpan.FromSeconds(5);
+
     private readonly PeerMessageSerializer _serializer = new();
     private readonly IDiagnosticLog _log = diagnostics ?? NullDiagnosticLog.Instance;
     private readonly ConcurrentDictionary<PlayerId, PeerLink> _links = new();
     private TcpListener? _listener;
     private CancellationTokenSource? _lifetime;
     private PlayerId _localId;
+    private (IReadOnlyList<string> Addresses, long ReadAt)? _localAddresses;
 
     public event EventHandler<PeerConnection>? PeerConnected;
 
@@ -145,7 +152,20 @@ public sealed class TcpPeerNetwork(IDiagnosticLog? diagnostics = null) : IPeerNe
         return Task.CompletedTask;
     }
 
-    public IReadOnlyList<string> GetLocalAddresses() =>
+    public IReadOnlyList<string> GetLocalAddresses()
+    {
+        var now = Environment.TickCount64;
+        if (_localAddresses is { } cached && now - cached.ReadAt < (long)AddressCacheLifetime.TotalMilliseconds)
+        {
+            return cached.Addresses;
+        }
+
+        var addresses = ReadLocalAddresses();
+        _localAddresses = (addresses, now);
+        return addresses;
+    }
+
+    private static string[] ReadLocalAddresses() =>
         NetworkInterface.GetAllNetworkInterfaces()
             .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
             .SelectMany(n => n.GetIPProperties().UnicastAddresses)

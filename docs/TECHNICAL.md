@@ -21,7 +21,7 @@ Presentation.Wpf ──► Application ──► Domain
 
 UI never touches domain. It receives immutable read models `SessionSnapshot` via `ISessionPresenter`.
 
-The wire protocol is versioned (`ProtocolInfo.Version`, currently **3**: profiles, private chat, nudges, game invites). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
+The wire protocol is versioned (`ProtocolInfo.Version`, currently **4**: profiles, private chat, nudges, game invites, invite acknowledgements). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
 
 **Transport security:** peer traffic is plain JSON over TCP on the local network. It is not encrypted or authenticated beyond the game handshake; fair dice and lockstep validation protect game integrity, not confidentiality.
 
@@ -31,7 +31,7 @@ The wire protocol is versioned (`ProtocolInfo.Version`, currently **3**: profile
 Every member connects to every other. Host keeps member list and greets newcomers. On host leave, first member in join order becomes host — deterministic because all peers hold same list.
 
 ### Games inside lobby
-Proposer = initiator. If two invites cross, lower ID wins on every peer. Initiator seats `self + accepted` and sends start message. Only initiator can stop. Game ends if initiator leaves lobby.
+Proposer = initiator. One game per lobby: while one is being set up or played nobody else can propose, and a running game beats any invite. If two invites cross, lower ID wins on every peer. Every member tells the initiator once the invite is the one it holds (`MatchSeenMessage`); the initiator can only start after all connected members have, so a crossing invite can't pull seated players away from a game that has begun. A member that drops or ignores an invite because something beats it tells that invite's initiator (`MatchOutrankedMessage`), which withdraws it, so an initiator that can't hear the winning game itself never waits forever. A peer seated in a start it has given up on sends a leave so the game doesn't wait on its dice. Initiator seats `self + accepted` and sends start message. Only initiator can stop. Game ends if initiator leaves lobby.
 
 ### Spectators
 Spectators don't participate in dice protocol. Initiator keeps append-only log of rolls/moves/drop-outs and streams to non-players. Late joiners replay log on fresh board. Gap detection -> re-request.
