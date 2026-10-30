@@ -62,6 +62,38 @@ public sealed class PeerSessionTests
     }
 
     [Fact]
+    public async Task Someone_rejoining_before_their_old_link_drops_keeps_one_lobby_entry()
+    {
+        var id = Ludo.Domain.Players.PlayerId.New();
+        var peers = new[] { new TestPeer("Host"), new TestPeer("Other"), new TestPeer("Gone", localId: id) };
+        var back = new TestPeer("Back", localId: id);
+        try
+        {
+            var port = await FormLobbyAsync(peers);
+            await StartGameAsync(initiator: peers[0], peers);
+
+            // The first copy is still connected: to the others, this is a link that hasn't timed out yet.
+            await back.App.JoinLobby.ExecuteAsync(back.Name, "127.0.0.1", port);
+
+            await WaitUntil(
+                () => peers[..2].All(p => p.Latest.Members.Count == 3 && p.Latest.Members.Any(m => m.Name == "Back")),
+                "the returning player never replaced their old entry");
+            Assert.All(peers[..2], p => Assert.DoesNotContain(p.Latest.Members, m => m.Name == "Gone"));
+
+            // Their seat is gone, so the game carries on and they can only watch.
+            await WaitUntil(
+                () => peers[0].Latest.Match?.Game?.Seats.Single(s => s.Name == "Gone").Standing == SeatStanding.Left,
+                "the old seat still holds up the game");
+            await WaitUntil(() => back.Latest.Match is { Phase: MatchPhaseView.Playing, IsPlaying: false }, "they never got the game");
+        }
+        finally
+        {
+            await back.App.DisposeAsync();
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
     public async Task A_player_leaving_the_game_stays_in_the_lobby_and_watches()
     {
         var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
@@ -822,7 +854,7 @@ public sealed class PeerSessionTests
     {
         private volatile SessionSnapshot _latest = SessionSnapshot.Empty;
 
-        public TestPeer(string name, ILobbyDiscovery? discovery = null, IPeerNetwork? network = null)
+        public TestPeer(string name, ILobbyDiscovery? discovery = null, IPeerNetwork? network = null, Ludo.Domain.Players.PlayerId? localId = null)
         {
             Name = name;
             App = new LudoApplication(
@@ -830,7 +862,8 @@ public sealed class PeerSessionTests
                 discovery ?? new NullDiscovery(),
                 new Sha256CryptoProvider(),
                 this,
-                TimeProvider.System);
+                TimeProvider.System,
+                localId: localId);
         }
 
         public string Name { get; }

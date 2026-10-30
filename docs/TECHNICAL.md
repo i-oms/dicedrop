@@ -118,7 +118,8 @@ Photos: shrunk to small JPEG, shared only with lobby
 
 ## 7. Limitations & Roadmap
 
-- No reconnection: dropping peer removed, game continues
+- Player ids are random GUIDs saved in `settings.json`, so someone rejoining keeps one lobby entry; a new link from a known id replaces the old one. Ids are not verified, so a lobby member could reuse another's id to take their place
+- No reconnection to a running game: dropping peer removed, game continues, and on return they can only watch
 - Crash mid-broadcast of dice reveal can cause rare disagreement (digest detects, not repairs)
 - No relay/NAT traversal
 - Roadmap: turn timer, rule variants (GameRules already supports), reconnect with state transfer, sound, cross-platform viewer

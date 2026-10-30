@@ -2,6 +2,7 @@ using Ludo.Application.Abstractions;
 using Ludo.Application.Session;
 using Ludo.Application.Sync;
 using Ludo.Application.UseCases;
+using Ludo.Domain.Players;
 
 namespace Ludo.Application;
 
@@ -19,10 +20,11 @@ public sealed class LudoApplication : IAsyncDisposable
         ICryptoProvider crypto,
         ISessionPresenter presenter,
         TimeProvider time,
-        IDiagnosticLog? diagnostics = null)
+        IDiagnosticLog? diagnostics = null,
+        PlayerId? localId = null)
     {
         _executor = new SessionExecutor(ex => presenter.PresentNotice($"Unexpected error: {ex.Message}"));
-        var context = new SessionContext(network, discovery, crypto, presenter, time);
+        var context = new SessionContext(network, discovery, crypto, presenter, time, localId ?? PlayerId.New());
         var gameplay = new GameplayProtocol(context);
         var matches = new MatchProtocol(context, gameplay, _executor);
         var lobby = new LobbyProtocol(context, matches);

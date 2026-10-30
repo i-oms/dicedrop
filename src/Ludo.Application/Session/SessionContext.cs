@@ -16,7 +16,8 @@ internal sealed class SessionContext(
     ILobbyDiscovery discovery,
     ICryptoProvider crypto,
     ISessionPresenter presenter,
-    TimeProvider time)
+    TimeProvider time,
+    PlayerId localId)
 {
     public const int MaxPlayers = 8;
     private const int MaxLogEntries = 200;
@@ -40,7 +41,11 @@ internal sealed class SessionContext(
 
     public SessionStage Stage { get; set; } = SessionStage.Idle;
 
-    public PlayerId LocalId { get; private set; }
+    /// <summary>Who we are. Stays the same across sessions, so coming back doesn't make us a new person.</summary>
+    public PlayerId LocalId { get; } = localId;
+
+    /// <summary>Names the lobby we would advertise. New each session, so a reopened lobby is not taken for the old one.</summary>
+    public Guid LobbyId { get; private set; }
 
     public string LocalName { get; private set; } = string.Empty;
 
@@ -108,7 +113,7 @@ internal sealed class SessionContext(
     public void Begin(string name)
     {
         Reset();
-        LocalId = PlayerId.New();
+        LobbyId = Guid.NewGuid();
         LocalName = name;
     }
 

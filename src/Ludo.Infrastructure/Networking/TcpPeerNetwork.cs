@@ -31,6 +31,9 @@ public sealed class TcpPeerNetwork(IDiagnosticLog? diagnostics = null) : IPeerNe
     private readonly PeerMessageSerializer _serializer = new();
     private readonly IDiagnosticLog _log = diagnostics ?? NullDiagnosticLog.Instance;
     private readonly ConcurrentDictionary<PlayerId, PeerLink> _links = new();
+
+    /// <summary>A peer keeps its id when it comes back, so a link's events must not interleave with its successor's.</summary>
+    private readonly Lock _linkEvents = new();
     private TcpListener? _listener;
     private CancellationTokenSource? _lifetime;
     private PlayerId _localId;
@@ -91,7 +94,7 @@ public sealed class TcpPeerNetwork(IDiagnosticLog? diagnostics = null) : IPeerNe
             await client.ConnectAsync(host, port, timeout.Token).ConfigureAwait(false);
             connected = true;
             var link = await HandshakeAsync(client, timeout.Token).ConfigureAwait(false);
-            Attach(link);
+            Attach(link, replaceExisting: false);
             _log.Write(Source, $"Connected to {host}:{port} (peer {Short(link.RemoteId)}).");
             return link.RemoteId;
         }
@@ -202,7 +205,7 @@ public sealed class TcpPeerNetwork(IDiagnosticLog? diagnostics = null) : IPeerNe
         try
         {
             var link = await HandshakeAsync(client, timeout.Token).ConfigureAwait(false);
-            Attach(link);
+            Attach(link, replaceExisting: true);
             _log.Write(Source, $"Accepted peer {Short(link.RemoteId)} from {from}.");
         }
         catch (Exception ex)
@@ -241,16 +244,34 @@ public sealed class TcpPeerNetwork(IDiagnosticLog? diagnostics = null) : IPeerNe
         return new PeerLink(client, remoteId, address.ToString(), remotePort);
     }
 
-    private void Attach(PeerLink link)
+    /// <param name="replaceExisting">
+    /// A peer dialling in while we still hold a link to it has restarted its session, and the old link just
+    /// hasn't timed out. It counts as leaving and rejoining, so its old seats and invites are cleared up.
+    /// </param>
+    private void Attach(PeerLink link, bool replaceExisting)
     {
-        if (!_links.TryAdd(link.RemoteId, link))
+        lock (_linkEvents)
         {
-            link.Abort();
-            throw new InvalidOperationException("Already connected to this peer.");
+            if (_links.TryGetValue(link.RemoteId, out var existing))
+            {
+                if (!replaceExisting)
+                {
+                    link.Abort();
+                    throw new InvalidOperationException("Already connected to this peer.");
+                }
+
+                _links.TryRemove(new KeyValuePair<PlayerId, PeerLink>(link.RemoteId, existing));
+                existing.Abort();
+                _log.Write(Source, $"Peer {Short(link.RemoteId)} reconnected from {link.RemoteHost}; replacing its old link.");
+                PeerDisconnected?.Invoke(this, link.RemoteId);
+            }
+
+            _links[link.RemoteId] = link;
+
+            // Raised before the read loop starts, so it always precedes this peer's first message.
+            PeerConnected?.Invoke(this, new PeerConnection(link.RemoteId, link.RemoteHost, link.RemoteListenPort));
         }
 
-        // Raised before the read loop starts, so it always precedes this peer's first message.
-        PeerConnected?.Invoke(this, new PeerConnection(link.RemoteId, link.RemoteHost, link.RemoteListenPort));
         _ = RunLinkAsync(link);
     }
 
@@ -269,14 +290,24 @@ public sealed class TcpPeerNetwork(IDiagnosticLog? diagnostics = null) : IPeerNe
                 return;
             }
 
-            MessageReceived?.Invoke(this, new IncomingMessage(link.RemoteId, message));
+            // A replaced link's last frames must not reach the peer's new session.
+            lock (_linkEvents)
+            {
+                if (_links.TryGetValue(link.RemoteId, out var current) && current == link)
+                {
+                    MessageReceived?.Invoke(this, new IncomingMessage(link.RemoteId, message));
+                }
+            }
         }).ConfigureAwait(false);
 
         // Only report links that are still registered; a stopped network reports nothing.
-        if (_links.TryRemove(new KeyValuePair<PlayerId, PeerLink>(link.RemoteId, link)))
+        lock (_linkEvents)
         {
-            _log.Write(Source, $"Link to peer {Short(link.RemoteId)} at {link.RemoteHost} closed.");
-            PeerDisconnected?.Invoke(this, link.RemoteId);
+            if (_links.TryRemove(new KeyValuePair<PlayerId, PeerLink>(link.RemoteId, link)))
+            {
+                _log.Write(Source, $"Link to peer {Short(link.RemoteId)} at {link.RemoteHost} closed.");
+                PeerDisconnected?.Invoke(this, link.RemoteId);
+            }
         }
     }
 

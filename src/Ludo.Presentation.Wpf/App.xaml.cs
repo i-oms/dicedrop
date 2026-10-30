@@ -48,20 +48,21 @@ public partial class App : System.Windows.Application
         var presenter = new WpfSessionPresenter(Dispatcher);
         var diagnostics = new WpfDiagnosticLog(Dispatcher);
         _discovery = new UdpLobbyDiscovery(diagnostics);
+        var settings = UserSettings.Load().WithPlayerId();
         _app = new LudoApplication(
             new TcpPeerNetwork(diagnostics),
             _discovery,
             new Sha256CryptoProvider(),
             presenter,
             TimeProvider.System,
-            diagnostics);
+            diagnostics,
+            new Ludo.Domain.Players.PlayerId(settings.PlayerId!.Value));
 
         // The release workflow stamps the tag's version into the exe; local builds stay 0.0.0 and skip the check.
         var version = Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0);
         _releases = new GitHubReleaseFeed(ProjectLinks.Owner, ProjectLinks.Repository, $"DiceDrop/{version.ToString(3)}");
         var checkForUpdate = new CheckForUpdateUseCase(_releases, version, diagnostics);
 
-        var settings = UserSettings.Load();
         _viewModel = new MainViewModel(_app, presenter, diagnostics, checkForUpdate, settings);
         var viewModel = _viewModel;
         var window = new MainWindow { DataContext = _viewModel };

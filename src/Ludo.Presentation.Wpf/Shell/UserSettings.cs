@@ -23,6 +23,9 @@ internal sealed record UserSettings
 
     public bool NudgeShake { get; init; } = true;
 
+    /// <summary>A random id, shown to the lobby, that keeps us the same person when we reconnect. Null until first run.</summary>
+    public Guid? PlayerId { get; init; }
+
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DiceDrop", "settings.json");
 
@@ -39,6 +42,26 @@ internal sealed record UserSettings
         {
             return new UserSettings();
         }
+    }
+
+    /// <summary>These settings with a player id, saved if it is new. If saving fails the id only lasts this run.</summary>
+    public UserSettings WithPlayerId()
+    {
+        if (PlayerId is not null && PlayerId != Guid.Empty)
+        {
+            return this;
+        }
+
+        var settings = this with { PlayerId = Guid.NewGuid() };
+        try
+        {
+            settings.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        return settings;
     }
 
     /// <exception cref="IOException">The file could not be written.</exception>

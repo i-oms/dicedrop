@@ -348,7 +348,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         context.Network.Broadcast(new LobbyStateMessage(
             context.Roster.Select(r => new RosterEntry(r.Id, r.Name, r.Ready)).ToArray()));
         context.Discovery.Advertise(new LobbyAdvertisement(
-            context.LocalId.Value,
+            context.LobbyId,
             context.LocalName,
             context.Network.ListenPort,
             context.Roster.Count,

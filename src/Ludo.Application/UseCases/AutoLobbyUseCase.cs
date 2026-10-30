@@ -222,7 +222,7 @@ public sealed class AutoLobbyUseCase : IDisposable
     private async Task MergeIfOutrankedAsync(string name, DateTimeOffset now)
     {
         var ours = _context.Roster.Count;
-        var ourId = _context.LocalId.Value;
+        var ourId = _context.LobbyId;
         foreach (var gone in _outrankedSince.Keys.Where(id => !_seen.ContainsKey(id)).ToArray())
         {
             _outrankedSince.Remove(gone);
@@ -291,7 +291,7 @@ public sealed class AutoLobbyUseCase : IDisposable
     /// </summary>
     private DiscoveredLobby? BestLobby(int seats, Func<DiscoveredLobby, bool>? filter = null) => _seen.Values
         .Select(e => e.Lobby)
-        .Where(l => l.LobbyId != _context.LocalId.Value && !_triedAt.ContainsKey(l.LobbyId) && l.Players + seats <= l.MaxPlayers)
+        .Where(l => l.LobbyId != _context.LobbyId && !_triedAt.ContainsKey(l.LobbyId) && l.Players + seats <= l.MaxPlayers)
         .Where(l => filter?.Invoke(l) ?? true)
         .OrderByDescending(l => l.Players)
         .ThenBy(l => l.LobbyId)
