@@ -799,6 +799,27 @@ public sealed class PeerSessionTests
     }
 
     [Fact]
+    public async Task Closing_for_everyone_reaches_every_other_member_but_not_the_sender()
+    {
+        var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+
+            await peers[1].App.CloseEveryApp.ExecuteAsync();
+
+            await WaitUntil(
+                () => peers[0].CloseRequests.SequenceEqual(["P1"]) && peers[2].CloseRequests.SequenceEqual(["P1"]),
+                "close request did not reach everyone");
+            Assert.True(peers[1].CloseRequests.IsEmpty);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
     public async Task An_answer_that_overtakes_its_notification_is_kept_and_a_stranger_cannot_answer()
     {
         var networks = Enumerable.Range(0, 4).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
@@ -1031,6 +1052,10 @@ public sealed class PeerSessionTests
         public System.Collections.Concurrent.ConcurrentQueue<PollActivityView> PollActivity { get; } = new();
 
         public void PresentPollActivity(PollActivityView activity) => PollActivity.Enqueue(activity);
+
+        public System.Collections.Concurrent.ConcurrentQueue<string> CloseRequests { get; } = new();
+
+        public void PresentCloseRequest(string from) => CloseRequests.Enqueue(from);
 
         /// <summary>A bot: rolls on its turn and always moves its first movable token, until the game ends for it.</summary>
         public async Task PlayAsync(CancellationToken cancellation)

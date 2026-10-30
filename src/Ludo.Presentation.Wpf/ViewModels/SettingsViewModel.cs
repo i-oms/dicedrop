@@ -30,6 +30,7 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _nudgeSound;
     private bool _nudgeShake;
     private bool _startWithWindows;
+    private bool _allowCloseByOthers;
     private string? _error;
 
     internal SettingsViewModel(LudoApplication app, UserSettings saved, Action<Exception> onError)
@@ -125,6 +126,12 @@ public sealed class SettingsViewModel : ObservableObject
         set => SetProperty(ref _startWithWindows, value);
     }
 
+    public bool AllowCloseByOthers
+    {
+        get => _allowCloseByOthers;
+        set => SetProperty(ref _allowCloseByOthers, value);
+    }
+
     /// <summary>A problem with the last photo or save, shown inside the sheet.</summary>
     public string? Error
     {
@@ -167,6 +174,7 @@ public sealed class SettingsViewModel : ObservableObject
         NudgeSound = _saved.NudgeSound;
         NudgeShake = _saved.NudgeShake;
         StartWithWindows = StartupRegistration.IsEnabled;
+        AllowCloseByOthers = _saved.AllowCloseByOthers;
         Error = null;
         IsOpen = true;
     }
@@ -210,6 +218,7 @@ public sealed class SettingsViewModel : ObservableObject
             ChatPopups = ChatPopups,
             NudgeSound = NudgeSound,
             NudgeShake = NudgeShake,
+            AllowCloseByOthers = AllowCloseByOthers,
         };
 
         try

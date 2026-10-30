@@ -18,6 +18,41 @@
         <DataTemplate DataType="{x:Type vm:GameViewModel}">
             <views:GameView />
         </DataTemplate>
+
+        <!-- A footer tool: an icon, passed in Tag, with Content as an optional label. Set AutomationProperties.Name, since tooltips are suppressed app-wide. -->
+        <Style x:Key="FooterIconButton" TargetType="Button">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent" Padding="2">
+                            <StackPanel Orientation="Horizontal">
+                                <Path x:Name="Mark" Width="20" Height="20" Stretch="Uniform" Fill="{StaticResource TextMuted}"
+                                      Data="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <TextBlock x:Name="Label" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMuted}"
+                                           Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Content" Value="{x:Null}">
+                                <Setter TargetName="Label" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Mark" Property="Fill" Value="{StaticResource Text}" />
+                                <Setter TargetName="Label" Property="Foreground" Value="{StaticResource Text}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Mark" Property="Opacity" Value="0.75" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Geometry x:Key="NetworkLogIcon">M9,2 H15 V8 H13 V11 H19 V16 H21 V22 H15 V16 H17 V13 H7 V16 H9 V22 H3 V16 H5 V11 H11 V8 H9 Z</Geometry>
+        <Geometry x:Key="GitHubIcon">M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z</Geometry>
+        <Geometry x:Key="CloseEveryoneIcon">M3,3 H21 V21 H3 Z M5,7 H19 V19 H5 Z M9.4,9 L12,11.6 L14.6,9 L16,10.4 L13.4,13 L16,15.6 L14.6,17 L12,14.4 L9.4,17 L8,15.6 L10.6,13 L8,10.4 Z</Geometry>
     </security:ProtectedWindow.Resources>
 
     <security:ProtectedWindow.InputBindings>
@@ -91,29 +126,30 @@
                     </Style.Triggers>
                 </Style>
             </StackPanel.Style>
-            <Button Style="{StaticResource SecondaryButton}" Padding="10,3" FontSize="12"
-                    Content="Network log (F12)" Command="{Binding Diagnostics.ToggleCommand}" />
-            <!-- GitHub mark: opens the source code. Named for screen readers, since tooltips are suppressed app-wide. -->
-            <Button Margin="8,0,0,0" VerticalAlignment="Center" Cursor="Hand" AutomationProperties.Name="Source code on GitHub"
-                    Command="{Binding OpenSourceCodeCommand}">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="Transparent" Padding="2">
-                            <Path x:Name="Mark" Width="20" Height="20" Stretch="Uniform" Fill="{StaticResource TextMuted}"
-                                  Data="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Mark" Property="Fill" Value="{StaticResource Text}" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Mark" Property="Opacity" Value="0.75" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
+            <Button Style="{StaticResource FooterIconButton}" Tag="{StaticResource NetworkLogIcon}"
+                    AutomationProperties.Name="Network log" Command="{Binding Diagnostics.ToggleCommand}" />
+            <Button Style="{StaticResource FooterIconButton}" Tag="{StaticResource GitHubIcon}" Margin="8,0,0,0"
+                    AutomationProperties.Name="Source code on GitHub" Command="{Binding OpenSourceCodeCommand}" />
+            <Button Style="{StaticResource FooterIconButton}" Tag="{StaticResource CloseEveryoneIcon}" Margin="8,0,0,0"
+                    Content="Close for everyone" AutomationProperties.Name="Close for everyone" Command="{Binding Lobby.AskCloseEveryoneCommand}"
+                    Visibility="{Binding CanCloseEveryone, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
+
+        <!-- Close the window on every device in the lobby, after one confirmation. DiceDrop keeps running in the tray. -->
+        <Border VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="8,0,0,40" Width="256" Padding="14,12" CornerRadius="14"
+                Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                Effect="{StaticResource FloatingShadow}" views:Motion.Enter="True" views:Motion.EnterOffset="20"
+                Visibility="{Binding Lobby.IsConfirmingClose, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+                <TextBlock FontWeight="SemiBold" Text="Close for everyone?" />
+                <TextBlock Style="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,10"
+                           Text="This closes the window here and on every device in the lobby. DiceDrop keeps running in the tray." />
+                <WrapPanel>
+                    <Button Content="Close all" Padding="12,6" FontSize="13" Margin="0,0,8,0" Command="{Binding Lobby.CloseEveryoneCommand}" />
+                    <Button Style="{StaticResource SecondaryButton}" Content="Cancel" Padding="12,6" FontSize="13" Command="{Binding Lobby.CancelCloseEveryoneCommand}" />
+                </WrapPanel>
+            </StackPanel>
+        </Border>
 
         <!-- Update banner: a newer release is out. Clicking it opens the release page in the browser. -->
         <Border VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="8" Padding="4" CornerRadius="14"

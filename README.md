@@ -48,7 +48,8 @@
 - **Built-in messenger.** Lobby group chat, private chats, and **Nudge** (shakes the other player's window and plays a sound).
 - **Group Decisions.** Ask the people you pick a question with your own answers, like **Yes** and **No**. It stays on their screen until they vote, and everyone asked sees every vote, so you can decide together.
 - **Capture-proof window.** `WDA_EXCLUDEFROMCAPTURE` keeps the game out of PrintScreen, Snipping Tool, OBS and Teams/Zoom/Discord screen sharing.
-- **Portable and private.** One self-contained EXE of about 66 MB with no .NET install needed. Settings live in `%APPDATA%\DiceDrop\settings.json`, and the registry is touched only if you turn on **Start with Windows**.
+- **Portable and private.** One self-contained EXE of about 66 MB with no .NET install needed. Settings live in `%APPDATA%\DiceDrop\settings.json`, and the registry is touched only for **Start with Windows**, which is on from the first run and can be turned off in Settings or the tray menu.
+- **Close for everyone.** From the icon at the bottom left, anyone in the lobby or a game can close the DiceDrop window on every device in the lobby, with no countdown. DiceDrop keeps running in the tray. To keep your window open, turn off **Let others close my DiceDrop window** in Settings.
 - **Update notices.** Checks GitHub releases at startup and every 6 hours, then shows a banner. It never downloads or installs anything by itself. To update, just open the new EXE: it closes the running copy and takes over.
 
 ## Quick start
@@ -67,7 +68,7 @@ That's it. No port forwarding is needed.
 <details>
 <summary><b>PCs don't find each other? Click for the fix.</b></summary>
 
-Press **F12** (or the **Network log** button, bottom left) on both PCs. The log is kept in memory only and shows, in order:
+Press **F12** (or the network icon, bottom left) on both PCs. The log is kept in memory only and shows, in order:
 
 - **env**: this PC's network adapters, whether the network is Private or Public, and the Windows Firewall rules for this exact EXE. Lines starting with `PROBLEM` name the cause and the fix.
 - **udp**: which discovery ports opened, where beacons go, and which PCs were heard. "Heard only beacons from this PC" means no other PC's beacons are arriving: check the firewall on both PCs, check they're on the same subnet, and turn off the router's Wi-Fi client (AP) isolation.

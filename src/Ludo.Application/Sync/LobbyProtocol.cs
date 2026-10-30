@@ -250,6 +250,24 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         return DispatchResult.Handled;
     }
 
+    public void CloseEveryoneLocal()
+    {
+        RequireLobby();
+        context.Network.Broadcast(new CloseAppMessage());
+    }
+
+    public DispatchResult OnCloseApp(PlayerId from)
+    {
+        if (context.Stage != SessionStage.Lobby || !context.Peers.TryGetValue(from, out var peer) || !peer.IsGreeted)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        context.AddLog($"{peer.Name} closed the window for everyone.");
+        context.Presenter.PresentCloseRequest(peer.Name!);
+        return DispatchResult.Handled;
+    }
+
     /// <summary>Sets our avatar. Outside a lobby it is just kept, and goes out in the next Hello.</summary>
     public void ProfileLocal(PlayerProfile profile)
     {

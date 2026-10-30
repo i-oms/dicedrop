@@ -5,7 +5,7 @@ namespace Ludo.Application.Protocol;
 
 public static class ProtocolInfo
 {
-    public const int Version = 7;
+    public const int Version = 8;
 
     /// <summary>
     /// Port a host listens on when it can. Peers never depend on it: if it is taken, the host falls back
@@ -103,6 +103,9 @@ public sealed record MoveMessage(Guid MatchId, int RollIndex, int TokenIndex) : 
 
 /// <summary>Member to everyone: I am leaving the lobby.</summary>
 public sealed record LeaveMessage : PeerMessage;
+
+/// <summary>Member to everyone: close your window but keep running. Each receiver's own settings decide whether it obeys.</summary>
+public sealed record CloseAppMessage : PeerMessage;
 
 /// <param name="Color">Index into the shared avatar palette, used behind initials when there is no photo.</param>
 /// <param name="Photo">A small square PNG or JPEG, or null.</param>

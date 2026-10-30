@@ -47,6 +47,7 @@ public sealed class LobbyViewModel : ObservableObject
     private bool _canPropose;
     private GameInfo? _picking;
     private int _totalUnread;
+    private bool _isConfirmingClose;
 
     internal LobbyViewModel(LudoApplication app, Action<Exception> onError, Action<Guid> viewGame)
     {
@@ -76,11 +77,24 @@ public sealed class LobbyViewModel : ObservableObject
             key => app.ProposeGame.ExecuteAsync(GameCatalog.Ludo.Id, [(string)key!]),
             onError,
             _ => CanPropose);
+        AskCloseEveryoneCommand = new AsyncCommand(_ => { IsConfirmingClose = true; return Task.CompletedTask; }, onError);
+        CancelCloseEveryoneCommand = new AsyncCommand(_ => { IsConfirmingClose = false; return Task.CompletedTask; }, onError);
+        CloseEveryoneCommand = new AsyncCommand(
+            async _ =>
+            {
+                IsConfirmingClose = false;
+                await app.CloseEveryApp.ExecuteAsync();
+                ClosedForEveryone?.Invoke();
+            },
+            onError);
         foreach (var game in GameCatalog.All)
         {
             Games.Add(new GameCardItem(game));
         }
     }
+
+    /// <summary>The request went out to the lobby; this copy should hide its window now.</summary>
+    internal event Action? ClosedForEveryone;
 
     public NotificationsViewModel Notifications { get; }
 
@@ -156,6 +170,18 @@ public sealed class LobbyViewModel : ObservableObject
 
     /// <summary>Open invites and running games, the one that concerns us first, then the last game that ended.</summary>
     public ObservableCollection<MatchCardViewModel> MatchCards { get; } = [];
+
+    public bool IsConfirmingClose
+    {
+        get => _isConfirmingClose;
+        private set => SetProperty(ref _isConfirmingClose, value);
+    }
+
+    public ICommand AskCloseEveryoneCommand { get; }
+
+    public ICommand CancelCloseEveryoneCommand { get; }
+
+    public ICommand CloseEveryoneCommand { get; }
 
     public ICommand SelectCommand { get; }
 

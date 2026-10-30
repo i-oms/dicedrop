@@ -131,6 +131,8 @@ internal sealed class PeerMessageRouter
                 return _lobby.OnDirectChat(from, direct);
             case NudgeMessage:
                 return _lobby.OnNudge(from);
+            case CloseAppMessage:
+                return _lobby.OnCloseApp(from);
             case PollMessage poll:
                 return _polls.OnPoll(from, poll);
             case PollVoteMessage vote:

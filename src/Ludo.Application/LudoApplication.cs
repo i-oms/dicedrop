@@ -51,6 +51,7 @@ public sealed class LudoApplication : IAsyncDisposable
         SendPoll = new SendPollUseCase(context, _executor, polls);
         VotePoll = new VotePollUseCase(context, _executor, polls);
         RetractPoll = new RetractPollUseCase(context, _executor, polls);
+        CloseEveryApp = new CloseEveryAppUseCase(context, _executor, lobby);
     }
 
     public HostLobbyUseCase HostLobby { get; }
@@ -100,6 +101,9 @@ public sealed class LudoApplication : IAsyncDisposable
 
     /// <summary>The sender: take a notification back from everyone it went to.</summary>
     public RetractPollUseCase RetractPoll { get; }
+
+    /// <summary>Any lobby member: ask every DiceDrop in the lobby to close its window.</summary>
+    public CloseEveryAppUseCase CloseEveryApp { get; }
 
     public async ValueTask DisposeAsync()
     {

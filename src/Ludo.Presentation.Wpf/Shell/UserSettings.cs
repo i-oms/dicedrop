@@ -5,7 +5,7 @@ namespace Ludo.Presentation.Wpf.Shell;
 
 /// <summary>
 /// The local player's preferences. Kept in one small JSON file under %APPDATA%\DiceDrop, the only thing
-/// DiceDrop writes besides the optional "start with Windows" entry. Chat is never saved.
+/// DiceDrop writes besides the "start with Windows" entry. Chat is never saved.
 /// </summary>
 internal sealed record UserSettings
 {
@@ -22,6 +22,9 @@ internal sealed record UserSettings
     public bool NudgeSound { get; init; } = true;
 
     public bool NudgeShake { get; init; } = true;
+
+    /// <summary>Whether another lobby member's "Close for everyone" hides this copy's window too.</summary>
+    public bool AllowCloseByOthers { get; init; } = true;
 
     /// <summary>A random id, shown to the lobby, that keeps us the same person when we reconnect. Null until first run.</summary>
     public Guid? PlayerId { get; init; }

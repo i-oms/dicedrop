@@ -4,7 +4,7 @@ namespace Ludo.Presentation.Wpf.Shell;
 
 /// <summary>
 /// "Start with Windows" as a per-user Run entry: no installer, no admin rights, and nothing but this one
-/// registry value. The entry starts the game hidden in the tray.
+/// registry value. The entry starts the game hidden in the tray. On by default from the first run.
 /// </summary>
 internal static class StartupRegistration
 {
@@ -35,6 +35,19 @@ internal static class StartupRegistration
         else
         {
             key.DeleteValue(ValueName, throwOnMissingValue: false);
+        }
+    }
+
+    /// <summary>The first-run default. Only for a first run, so turning it off later sticks.</summary>
+    public static void EnableOnFirstRun()
+    {
+        try
+        {
+            SetEnabled(true);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or System.IO.IOException)
+        {
+            // Not worth failing startup over; it can still be turned on in settings.
         }
     }
 

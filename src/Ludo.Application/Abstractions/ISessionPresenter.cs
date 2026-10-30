@@ -22,4 +22,7 @@ public interface ISessionPresenter
 
     /// <summary>Someone sent us a notification or answered one; the next snapshot carries it too.</summary>
     void PresentPollActivity(PollActivityView activity);
+
+    /// <summary>Someone asked every DiceDrop in the lobby to close its window; whether this one does is up to the player's settings.</summary>
+    void PresentCloseRequest(string from);
 }

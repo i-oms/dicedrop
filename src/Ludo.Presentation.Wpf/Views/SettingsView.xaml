@@ -114,6 +114,12 @@
                             <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="Opens in the tray, so chat and nudges still reach you." TextWrapping="Wrap" />
                         </StackPanel>
                     </CheckBox>
+                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding AllowCloseByOthers}" Margin="0,6">
+                        <StackPanel>
+                            <TextBlock Text="Let others close my DiceDrop window" />
+                            <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="When someone uses Close for everyone, your window closes and DiceDrop keeps running in the tray. Turn this off to keep it open." TextWrapping="Wrap" />
+                        </StackPanel>
+                    </CheckBox>
 
                     <Border Margin="0,12,0,0" Padding="12,8" CornerRadius="10" Background="#33E5322D"
                             Visibility="{Binding Error, Converter={x:Static views:NullToVisibilityConverter.Instance}}">

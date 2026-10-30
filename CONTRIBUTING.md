@@ -481,7 +481,7 @@ DiceDrop ships as one self-contained `DiceDrop.exe` with no installer, no admin 
 
 - Don't require installation, elevation or files next to the exe.
 - Think twice before adding a NuGet package. Every dependency grows the exe and must work with single-file publishing. Mention any new package and why in your pull request.
-- Keep anything written to disk or the registry to the minimum, and only on user request (like "Start with Windows").
+- Keep anything written to disk or the registry to the minimum, and only on user request. The one exception is "Start with Windows", which is on from the first run and can be turned off.
 
 ### 11.6 Code style
 

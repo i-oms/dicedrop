@@ -21,7 +21,7 @@ Presentation.Wpf ──► Application ──► Domain
 
 UI never touches domain. It receives immutable read models `SessionSnapshot` via `ISessionPresenter`.
 
-The wire protocol is versioned (`ProtocolInfo.Version`, currently **6**: profiles, private chat, nudges, game invites, invite acknowledgements, group decisions, taking group decisions back). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
+The wire protocol is versioned (`ProtocolInfo.Version`, currently **8**: profiles, private chat, nudges, game invites, invite acknowledgements, group decisions, taking group decisions back, closing for everyone). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
 
 **Transport security:** peer traffic is plain JSON over TCP on the local network. It is not encrypted or authenticated beyond the game handshake; fair dice and lockstep validation protect game integrity, not confidentiality.
 
@@ -108,7 +108,7 @@ Version: DICEDROP_VERSION env, else newest vX.Y.Z tag behind current commit, els
 Update check: GitHub API latest release on startup + every 6h, banner -> opens release page, no auto-download.
               Skipped for 0.0.0 builds; fails quietly offline (reason in network log).
 Settings: %APPDATA%\DiceDrop\settings.json
-Startup: optional, HKCU\Software\Microsoft\Windows\CurrentVersion\Run (only when "Start with Windows" is on)
+Startup: HKCU\Software\Microsoft\Windows\CurrentVersion\Run while "Start with Windows" is on (turned on once, at first run)
 Photos: shrunk to small JPEG, shared only with lobby
 ```
 

@@ -71,8 +71,17 @@ public sealed class MainViewModel : ObservableObject
     public object CurrentScreen
     {
         get => _currentScreen;
-        private set => SetProperty(ref _currentScreen, value);
+        private set
+        {
+            if (SetProperty(ref _currentScreen, value))
+            {
+                OnPropertyChanged(nameof(CanCloseEveryone));
+            }
+        }
     }
+
+    /// <summary>There is nobody to close for until a lobby has been found.</summary>
+    public bool CanCloseEveryone => CurrentScreen != Searching;
 
     public string? Notice
     {

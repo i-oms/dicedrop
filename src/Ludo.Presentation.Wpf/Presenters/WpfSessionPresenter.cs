@@ -47,4 +47,8 @@ internal sealed class WpfSessionPresenter(Dispatcher dispatcher) : ISessionPrese
     public event Action<PollActivityView>? PollActivity;
 
     public void PresentPollActivity(PollActivityView activity) => dispatcher.BeginInvoke(() => PollActivity?.Invoke(activity));
+
+    public event Action<string>? CloseRequested;
+
+    public void PresentCloseRequest(string from) => dispatcher.BeginInvoke(() => CloseRequested?.Invoke(from));
 }

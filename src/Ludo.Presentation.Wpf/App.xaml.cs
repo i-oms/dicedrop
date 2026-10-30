@@ -48,7 +48,13 @@ public partial class App : System.Windows.Application
         var presenter = new WpfSessionPresenter(Dispatcher);
         var diagnostics = new WpfDiagnosticLog(Dispatcher);
         _discovery = new UdpLobbyDiscovery(diagnostics);
-        var settings = UserSettings.Load().WithPlayerId();
+        var loaded = UserSettings.Load();
+        if (loaded.PlayerId is null)
+        {
+            StartupRegistration.EnableOnFirstRun();
+        }
+
+        var settings = loaded.WithPlayerId();
         _app = new LudoApplication(
             new TcpPeerNetwork(diagnostics),
             _discovery,
@@ -78,6 +84,14 @@ public partial class App : System.Windows.Application
         };
 
         _tray = new TrayShell(window, presenter, Shutdown, OpenQuickMessage);
+        viewModel.Lobby.ClosedForEveryone += window.Hide;
+        presenter.CloseRequested += _ =>
+        {
+            if (viewModel.Settings.Saved.AllowCloseByOthers)
+            {
+                window.Hide();
+            }
+        };
         _chatToasts = new ChatToastController(
             window,
             presenter,
