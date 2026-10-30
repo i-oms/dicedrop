@@ -43,4 +43,8 @@ internal sealed class WpfSessionPresenter(Dispatcher dispatcher) : ISessionPrese
     public event Action<NudgeView>? NudgeReceived;
 
     public void PresentNudge(NudgeView nudge) => dispatcher.BeginInvoke(() => NudgeReceived?.Invoke(nudge));
+
+    public event Action<PollActivityView>? PollActivity;
+
+    public void PresentPollActivity(PollActivityView activity) => dispatcher.BeginInvoke(() => PollActivity?.Invoke(activity));
 }

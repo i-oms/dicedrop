@@ -22,6 +22,7 @@ internal sealed class SessionContext(
     private const int MaxLogEntries = 200;
     private const int MaxChatEntries = 200;
     private const int MaxDirectEntries = 200;
+    private const int MaxPolls = 50;
 
     private readonly List<string> _log = [];
     private readonly List<ChatLineView> _chat = [];
@@ -61,6 +62,12 @@ internal sealed class SessionContext(
 
     /// <summary>Matches that ended in this session; late messages for them are dropped, not parked.</summary>
     public HashSet<Guid> PastMatches { get; } = [];
+
+    /// <summary>Notifications of the current lobby, oldest first. Held in memory only, like the chat.</summary>
+    public List<PollState> Polls { get; } = [];
+
+    /// <summary>Notifications trimmed from <see cref="Polls"/>; late answers to them are dropped, not parked.</summary>
+    public HashSet<Guid> PastPolls { get; } = [];
 
     public List<IncomingMessage> Deferred { get; } = [];
 
@@ -113,6 +120,8 @@ internal sealed class SessionContext(
         HostId = null;
         Match = null;
         PastMatches.Clear();
+        Polls.Clear();
+        PastPolls.Clear();
         Peers.Clear();
         Roster.Clear();
         Deferred.Clear();
@@ -187,6 +196,16 @@ internal sealed class SessionContext(
         }
 
         Presenter.PresentChat(line);
+    }
+
+    public void AddPoll(PollState poll)
+    {
+        Polls.Add(poll);
+        if (Polls.Count > MaxPolls)
+        {
+            PastPolls.Add(Polls[0].Id);
+            Polls.RemoveAt(0);
+        }
     }
 
     /// <summary>Our avatar, or the one a peer sent us; peers we have no profile for get a colour from their id.</summary>

@@ -57,9 +57,10 @@ public sealed record SessionSnapshot(
     IReadOnlyList<string> Log,
     IReadOnlyList<ChatLineView> Chat,
     IReadOnlyList<DirectChatView> DirectChats,
-    string LocalKey)
+    string LocalKey,
+    IReadOnlyList<PollView> Polls)
 {
-    public static SessionSnapshot Empty { get; } = new(SessionStage.Idle, string.Empty, false, [], false, [], null, [], [], [], string.Empty);
+    public static SessionSnapshot Empty { get; } = new(SessionStage.Idle, string.Empty, false, [], false, [], null, [], [], [], string.Empty, []);
 }
 
 /// <param name="Key">Stable id for this member within the lobby; use it to message, nudge or invite them.</param>
@@ -97,6 +98,26 @@ public sealed record DirectChatView(string PeerKey, string PeerName, bool IsPres
 
 /// <summary>Someone nudged us.</summary>
 public sealed record NudgeView(string FromKey, string From);
+
+/// <summary>A notification with answer buttons that we sent or received.</summary>
+/// <param name="FromKey">The sender's <see cref="MemberView.Key"/>.</param>
+/// <param name="IsMine">We sent it, so we follow the answers rather than give one.</param>
+public sealed record PollView(
+    Guid Id,
+    string FromKey,
+    string From,
+    bool IsMine,
+    string Question,
+    IReadOnlyList<string> Options,
+    IReadOnlyList<PollMemberView> Recipients);
+
+/// <param name="IsPresent">Still in the lobby, so an answer can still come.</param>
+/// <param name="Choice">Index into <see cref="PollView.Options"/>; null until they answer.</param>
+public sealed record PollMemberView(string Key, string Name, bool IsLocal, bool IsPresent, int? Choice);
+
+/// <summary>Someone sent us a notification, or answered one we are part of.</summary>
+/// <param name="Text">The question, or for an answer the chosen button and the question.</param>
+public sealed record PollActivityView(Guid PollId, string FromKey, string From, string Text, bool IsNew);
 
 /// <summary>Someone in the lobby asked who wants to play.</summary>
 public sealed record InviteView(Guid MatchId, string From, string GameName);

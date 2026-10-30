@@ -18,19 +18,22 @@ internal sealed class PeerMessageRouter
     private readonly LobbyProtocol _lobby;
     private readonly MatchProtocol _matches;
     private readonly GameplayProtocol _gameplay;
+    private readonly PollProtocol _polls;
 
     public PeerMessageRouter(
         SessionContext context,
         SessionExecutor executor,
         LobbyProtocol lobby,
         MatchProtocol matches,
-        GameplayProtocol gameplay)
+        GameplayProtocol gameplay,
+        PollProtocol polls)
     {
         _context = context;
         _executor = executor;
         _lobby = lobby;
         _matches = matches;
         _gameplay = gameplay;
+        _polls = polls;
 
         context.Network.PeerConnected += (_, connection) => executor.Post(() => OnConnected(connection));
         context.Network.PeerDisconnected += (_, peer) => executor.Post(() => OnDisconnectedAsync(peer));
@@ -78,6 +81,7 @@ internal sealed class PeerMessageRouter
         // Game first: it still needs the leaver's name, which the lobby forgets.
         _matches.OnPeerGone(peer);
         _gameplay.OnPeerGone(peer);
+        _polls.OnPeerGone(peer);
         await _lobby.OnPeerGoneAsync(peer).ConfigureAwait(false);
         await DrainDeferredAsync().ConfigureAwait(false);
         _context.Publish();
@@ -127,6 +131,10 @@ internal sealed class PeerMessageRouter
                 return _lobby.OnDirectChat(from, direct);
             case NudgeMessage:
                 return _lobby.OnNudge(from);
+            case PollMessage poll:
+                return _polls.OnPoll(from, poll);
+            case PollVoteMessage vote:
+                return _polls.OnVote(from, vote);
             case ProfileMessage profile:
                 return _lobby.OnProfile(from, profile);
             case JoinRejectedMessage rejected:

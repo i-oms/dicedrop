@@ -15,13 +15,13 @@ Presentation.Wpf ──► Application ──► Domain
 | Project | Responsibility | May depend on |
 |---|---|---|
 | `Ludo.Domain` | Entities & rules: `LudoGame` aggregate, N-player `BoardTopology` (≥4 arms), `GameRules`, domain events. Pure, deterministic, no I/O/time/randomness. | nothing |
-| `Ludo.Application` | Use cases exposed by `LudoApplication`: lobby (`AutoLobby`, `HostLobby`, `JoinLobby`, `LeaveSession`), games (`ProposeGame`, `AcceptInvite`/`DeclineInvite`, `StartGame`, `LeaveGame`, `StopGame`, `RollDice`, `MoveToken`), messenger (`SendChat`, `SendDirectChat`, `Nudge`, `RenamePlayer`, `UpdateProfile`) and `CheckForUpdate`. Ports (`IPeerNetwork`, `ILobbyDiscovery`, `ICryptoProvider`, `ISessionPresenter`, `IReleaseFeed`, `IDiagnosticLog`), the sync protocol and fair dice. | Domain |
+| `Ludo.Application` | Use cases exposed by `LudoApplication`: lobby (`AutoLobby`, `HostLobby`, `JoinLobby`, `LeaveSession`), games (`ProposeGame`, `AcceptInvite`/`DeclineInvite`, `StartGame`, `LeaveGame`, `StopGame`, `RollDice`, `MoveToken`), messenger (`SendChat`, `SendDirectChat`, `Nudge`, `SendPoll`, `VotePoll`, `RenamePlayer`, `UpdateProfile`) and `CheckForUpdate`. Ports (`IPeerNetwork`, `ILobbyDiscovery`, `ICryptoProvider`, `ISessionPresenter`, `IReleaseFeed`, `IDiagnosticLog`), the sync protocol and fair dice. | Domain |
 | `Ludo.Infrastructure` | Adapters: TCP mesh transport, UDP LAN discovery, SHA-256/CSPRNG, JSON wire format, GitHub release feed, network/firewall diagnostics. | Application |
 | `Ludo.Presentation.Wpf` | MVVM UI, board renderer, capture protection, tray icon, settings, composition root `App.xaml.cs` — only place that knows all layers. | Application, Infrastructure |
 
 UI never touches domain. It receives immutable read models `SessionSnapshot` via `ISessionPresenter`.
 
-The wire protocol is versioned (`ProtocolInfo.Version`, currently **4**: profiles, private chat, nudges, game invites, invite acknowledgements). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
+The wire protocol is versioned (`ProtocolInfo.Version`, currently **5**: profiles, private chat, nudges, game invites, invite acknowledgements, notifications). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
 
 **Transport security:** peer traffic is plain JSON over TCP on the local network. It is not encrypted or authenticated beyond the game handshake; fair dice and lockstep validation protect game integrity, not confidentiality.
 
@@ -32,6 +32,9 @@ Every member connects to every other. Host keeps member list and greets newcomer
 
 ### Games inside lobby
 Proposer = initiator. One game per lobby: while one is being set up or played nobody else can propose, and a running game beats any invite. If two invites cross, lower ID wins on every peer. Every member tells the initiator once the invite is the one it holds (`MatchSeenMessage`); the initiator can only start after all connected members have, or after a 5-second grace period so a silent member can't block the start, so a crossing invite can't pull seated players away from a game that has begun. A member that drops or ignores an invite because something beats it tells that invite's initiator (`MatchOutrankedMessage`), which withdraws it, so an initiator that can't hear the winning game itself never waits forever. A peer seated in a start it has given up on sends a leave so the game doesn't wait on its dice. Initiator seats `self + accepted` and sends start message. Only initiator can stop. Game ends if initiator leaves lobby.
+
+### Notifications
+A notification (`PollMessage`) is sent only to the members its sender picked, along with the full recipient list. Each answer (`PollVoteMessage`) goes straight from the recipient to the sender and the other recipients, so members left out never hear about it. An answer can overtake its notification, in which case it is parked until the notification arrives. Answers can be changed: links keep their order, so all peers settle on the latest. The sender doesn't answer. Like chat, notifications live in memory and are dropped when the lobby is left.
 
 ### Spectators
 Spectators don't participate in dice protocol. Initiator keeps append-only log of rolls/moves/drop-outs and streams to non-players. Late joiners replay log on fresh board. Gap detection -> re-request. A replay of an unknown match is only accepted from its seat 0 and never ends an open invite; it waits until the invite is gone. A peer seated in a running game ignores `LobbyClosedMessage` and `JoinRejectedMessage`.

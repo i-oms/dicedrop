@@ -26,7 +26,8 @@ public sealed class LudoApplication : IAsyncDisposable
         var gameplay = new GameplayProtocol(context);
         var matches = new MatchProtocol(context, gameplay, _executor);
         var lobby = new LobbyProtocol(context, matches);
-        var router = new PeerMessageRouter(context, _executor, lobby, matches, gameplay);
+        var polls = new PollProtocol(context);
+        var router = new PeerMessageRouter(context, _executor, lobby, matches, gameplay, polls);
 
         HostLobby = new HostLobbyUseCase(context, _executor, lobby);
         JoinLobby = new JoinLobbyUseCase(context, _executor);
@@ -45,6 +46,8 @@ public sealed class LudoApplication : IAsyncDisposable
         SendDirectChat = new SendDirectChatUseCase(context, _executor, lobby);
         Nudge = new NudgeUseCase(context, _executor, lobby);
         UpdateProfile = new UpdateProfileUseCase(context, _executor, lobby);
+        SendPoll = new SendPollUseCase(context, _executor, polls);
+        VotePoll = new VotePollUseCase(context, _executor, polls);
     }
 
     public HostLobbyUseCase HostLobby { get; }
@@ -84,6 +87,12 @@ public sealed class LudoApplication : IAsyncDisposable
     public NudgeUseCase Nudge { get; }
 
     public UpdateProfileUseCase UpdateProfile { get; }
+
+    /// <summary>Any lobby member: send chosen members a notification with answer buttons.</summary>
+    public SendPollUseCase SendPoll { get; }
+
+    /// <summary>A recipient: answer a notification, or change the answer.</summary>
+    public VotePollUseCase VotePoll { get; }
 
     public async ValueTask DisposeAsync()
     {

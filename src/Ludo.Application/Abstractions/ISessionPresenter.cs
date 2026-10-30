@@ -19,4 +19,7 @@ public interface ISessionPresenter
 
     /// <summary>Someone nudged us; the next snapshot carries the nudge line in their private conversation.</summary>
     void PresentNudge(NudgeView nudge);
+
+    /// <summary>Someone sent us a notification or answered one; the next snapshot carries it too.</summary>
+    void PresentPollActivity(PollActivityView activity);
 }

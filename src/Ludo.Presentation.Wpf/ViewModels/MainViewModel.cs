@@ -42,6 +42,15 @@ public sealed class MainViewModel : ObservableObject
         presenter.SessionChanged += Apply;
         presenter.NoticeRaised += message => Notice = message;
 
+        // The list is on the lobby screen, so someone at the board needs telling.
+        presenter.PollActivity += activity =>
+        {
+            if (activity.IsNew && CurrentScreen == Game)
+            {
+                Notice = $"{activity.From} sent you a notification. Go back to the lobby to answer it.";
+            }
+        };
+
         _currentScreen = Searching;
     }
 

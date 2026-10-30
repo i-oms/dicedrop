@@ -604,6 +604,114 @@ public sealed class PeerSessionTests
         }
     }
 
+    [Fact]
+    public async Task A_notification_reaches_only_those_picked_and_everyone_involved_sees_each_answer()
+    {
+        var peers = Enumerable.Range(0, 4).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var involved = peers.Take(3).ToArray();
+            await peers[0].App.SendPoll.ExecuteAsync("Pizza tonight?", ["Yes", "No"], [peers[1].Latest.LocalKey, peers[2].Latest.LocalKey]);
+            await WaitUntil(() => involved.All(p => p.Latest.Polls.Count == 1), "notification did not reach those picked");
+            var id = peers[0].Latest.Polls.Single().Id;
+            Assert.True(peers[0].Latest.Polls.Single().IsMine);
+            Assert.False(peers[1].Latest.Polls.Single().IsMine);
+            Assert.Equal("P0", peers[1].PollActivity.Single().From);
+
+            await peers[1].App.VotePoll.ExecuteAsync(id, 0);
+            await WaitUntil(
+                () => involved.All(p => p.Latest.Polls.Single().Recipients.Single(r => r.Name == "P1").Choice == 0),
+                "answer did not reach everyone involved");
+
+            // Changing an answer replaces it everywhere.
+            await peers[1].App.VotePoll.ExecuteAsync(id, 1);
+            await peers[2].App.VotePoll.ExecuteAsync(id, 0);
+            await WaitUntil(
+                () => involved.All(p => p.Latest.Polls.Single().Recipients.Select(r => r.Choice).Order().SequenceEqual([0, 1])
+                    && p.Latest.Polls.Single().Recipients.Single(r => r.Name == "P1").Choice == 1),
+                "changed answer did not reach everyone involved");
+
+            // The sender follows the answers, and whoever was left out hears nothing at all.
+            await Assert.ThrowsAsync<SessionException>(() => peers[0].App.VotePoll.ExecuteAsync(id, 0));
+            await Assert.ThrowsAsync<SessionException>(() => peers[3].App.VotePoll.ExecuteAsync(id, 0));
+            Assert.Empty(peers[3].Latest.Polls);
+            Assert.True(peers[3].PollActivity.IsEmpty);
+
+            // Someone leaving keeps their answer and their name.
+            await peers[1].App.LeaveSession.ExecuteAsync();
+            await WaitUntil(
+                () => !peers[0].Latest.Polls.Single().Recipients.Single(r => r.Name == "P1").IsPresent,
+                "leaver still shown as present");
+            Assert.Equal(1, peers[0].Latest.Polls.Single().Recipients.Single(r => r.Name == "P1").Choice);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task An_answer_that_overtakes_its_notification_is_kept_and_a_stranger_cannot_answer()
+    {
+        var networks = Enumerable.Range(0, 4).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var ids = peers.Select(p => SessionContext.FindByKey(p.Latest.LocalKey)!.Value).ToArray();
+            var poll = Guid.NewGuid();
+
+            networks[2].Inject(ids[1], new PollVoteMessage(poll, 1));
+            networks[2].Inject(ids[0], new PollMessage(poll, "Pizza?", ["Yes", "No"], [ids[1], ids[2]]));
+            await WaitUntil(
+                () => peers[2].Latest.Polls.SingleOrDefault()?.Recipients.Single(r => r.Name == "P1").Choice == 1,
+                "early answer was lost");
+
+            // P3 was not asked, and answers that are not on the list mean nothing.
+            networks[2].Inject(ids[3], new PollVoteMessage(poll, 0));
+            networks[2].Inject(ids[1], new PollVoteMessage(poll, 7));
+            await peers[2].App.VotePoll.ExecuteAsync(poll, 0);
+            var view = peers[2].Latest.Polls.Single();
+            Assert.DoesNotContain(view.Recipients, r => r.Name == "P3");
+            Assert.Equal(1, view.Recipients.Single(r => r.Name == "P1").Choice);
+            Assert.Equal(0, view.Recipients.Single(r => r.IsLocal).Choice);
+
+            // A notification that does not list us, or breaks the limits, is dropped.
+            networks[3].Inject(ids[0], new PollMessage(Guid.NewGuid(), "Not for you", ["Yes", "No"], [ids[1]]));
+            networks[3].Inject(ids[0], new PollMessage(Guid.NewGuid(), "Too few", ["Yes"], [ids[3]]));
+            networks[3].Inject(ids[0], new PollMessage(Guid.NewGuid(), "Same twice", ["Yes", "yes"], [ids[3]]));
+            await peers[3].App.UpdateProfile.ExecuteAsync(1, null);
+            Assert.Empty(peers[3].Latest.Polls);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task A_notification_breaking_the_limits_is_refused_before_it_is_sent()
+    {
+        var peers = Enumerable.Range(0, 2).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var other = peers[1].Latest.LocalKey;
+
+            await Assert.ThrowsAsync<SessionException>(() => peers[0].App.SendPoll.ExecuteAsync(" ", ["Yes", "No"], [other]));
+            await Assert.ThrowsAsync<SessionException>(() => peers[0].App.SendPoll.ExecuteAsync("Ok?", ["Yes"], [other]));
+            await Assert.ThrowsAsync<SessionException>(() => peers[0].App.SendPoll.ExecuteAsync("Ok?", ["Yes", " yes "], [other]));
+            await Assert.ThrowsAsync<SessionException>(() => peers[0].App.SendPoll.ExecuteAsync("Ok?", ["Yes", "No"], []));
+            await Assert.ThrowsAsync<SessionException>(() => peers[0].App.SendPoll.ExecuteAsync("Ok?", ["Yes", "No"], [peers[0].Latest.LocalKey]));
+            Assert.Empty(peers[0].Latest.Polls);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
     /// <summary>Peer 0 hosts and the rest join; returns the port once everyone is connected to everyone.</summary>
     private static async Task<int> FormLobbyAsync(TestPeer[] peers)
     {
@@ -707,6 +815,10 @@ public sealed class PeerSessionTests
         public System.Collections.Concurrent.ConcurrentQueue<NudgeView> Nudges { get; } = new();
 
         public void PresentNudge(NudgeView nudge) => Nudges.Enqueue(nudge);
+
+        public System.Collections.Concurrent.ConcurrentQueue<PollActivityView> PollActivity { get; } = new();
+
+        public void PresentPollActivity(PollActivityView activity) => PollActivity.Enqueue(activity);
 
         /// <summary>A bot: rolls on its turn and always moves its first movable token, until the game ends for it.</summary>
         public async Task PlayAsync(CancellationToken cancellation)

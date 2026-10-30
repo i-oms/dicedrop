@@ -39,6 +39,26 @@ internal sealed class RosterSeat(PlayerId id, string name)
     public bool Ready { get; set; }
 }
 
+/// <summary>A notification we sent or received, with the answers heard so far.</summary>
+internal sealed class PollState(Guid id, PlayerId sender, string question, IReadOnlyList<string> options, IReadOnlyList<PlayerId> recipients)
+{
+    public Guid Id { get; } = id;
+
+    public PlayerId Sender { get; } = sender;
+
+    public string Question { get; } = question;
+
+    public IReadOnlyList<string> Options { get; } = options;
+
+    public IReadOnlyList<PlayerId> Recipients { get; } = recipients;
+
+    /// <summary>Latest answer per recipient, as an index into <see cref="Options"/>.</summary>
+    public Dictionary<PlayerId, int> Votes { get; } = [];
+
+    /// <summary>Names of those involved who have left; the lobby no longer knows them.</summary>
+    public Dictionary<PlayerId, string> GoneNames { get; } = [];
+}
+
 internal sealed class DiceRoundState
 {
     /// <summary>Latest verified chain value per player; starts at their anchor.</summary>

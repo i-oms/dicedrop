@@ -47,7 +47,29 @@ internal static class SnapshotBuilder
                     context.Peers.TryGetValue(d.Key, out var peer) && peer.IsGreeted,
                     d.Value.ToArray()))
                 .ToArray(),
-            SessionContext.KeyOf(context.LocalId));
+            SessionContext.KeyOf(context.LocalId),
+            context.Polls.Select(p => BuildPoll(context, p)).ToArray());
+    }
+
+    private static PollView BuildPoll(SessionContext context, PollState poll)
+    {
+        string NameIn(PlayerId id) => poll.GoneNames.TryGetValue(id, out var name) ? name : context.NameOf(id);
+
+        return new PollView(
+            poll.Id,
+            SessionContext.KeyOf(poll.Sender),
+            NameIn(poll.Sender),
+            poll.Sender == context.LocalId,
+            poll.Question,
+            poll.Options,
+            poll.Recipients
+                .Select(id => new PollMemberView(
+                    SessionContext.KeyOf(id),
+                    NameIn(id),
+                    id == context.LocalId,
+                    id == context.LocalId || (context.Peers.TryGetValue(id, out var peer) && peer.IsGreeted),
+                    poll.Votes.TryGetValue(id, out var choice) ? choice : null))
+                .ToArray());
     }
 
     private static MatchView BuildMatch(SessionContext context, MatchState match)

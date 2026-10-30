@@ -66,6 +66,7 @@ public sealed class LobbyViewModel : ObservableObject
     {
         _app = app;
         _onError = onError;
+        Notifications = new NotificationsViewModel(app, onError);
         LobbyChat = new ConversationViewModel(null, app, onError) { IsSelected = true };
         Conversations.Add(LobbyChat);
         _selected = LobbyChat;
@@ -98,6 +99,8 @@ public sealed class LobbyViewModel : ObservableObject
             Games.Add(new GameCardItem(game));
         }
     }
+
+    public NotificationsViewModel Notifications { get; }
 
     /// <summary>The lobby's group chat, always first in the list.</summary>
     public ConversationViewModel LobbyChat { get; }
@@ -309,6 +312,7 @@ public sealed class LobbyViewModel : ObservableObject
         Me = snapshot.Members.FirstOrDefault(m => m.IsLocal) is { } local ? _people[local.Key] : Me;
         Members = snapshot.Members.Where(m => !m.IsLocal).Select(m => _people[m.Key]).ToArray();
         CanPropose = snapshot.CanProposeGame;
+        Notifications.Update(snapshot.Polls, Members, PersonOf);
 
         LobbyChat.Sync(snapshot.Chat, SenderOf);
         foreach (var member in Members)
@@ -343,6 +347,8 @@ public sealed class LobbyViewModel : ObservableObject
         {
             person.IsPresent = false;
         }
+
+        Notifications.Update([], [], PersonOf);
     }
 
     private PersonViewModel SenderOf(ChatLineView line) => PersonOf(line.SenderKey, line.Sender);

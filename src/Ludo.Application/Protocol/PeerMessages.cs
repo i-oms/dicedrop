@@ -5,7 +5,7 @@ namespace Ludo.Application.Protocol;
 
 public static class ProtocolInfo
 {
-    public const int Version = 4;
+    public const int Version = 5;
 
     /// <summary>
     /// Port a host listens on when it can. Peers never depend on it: if it is taken, the host falls back
@@ -45,6 +45,12 @@ public sealed record DirectChatMessage(string Text) : PeerMessage;
 
 /// <summary>Lobby member to one other member: "hey, look here". Receivers ignore nudges that come too fast.</summary>
 public sealed record NudgeMessage : PeerMessage;
+
+/// <summary>Lobby member to the members it picked: a notification with answer buttons. Nobody else receives it.</summary>
+public sealed record PollMessage(Guid PollId, string Question, IReadOnlyList<string> Options, IReadOnlyList<PlayerId> Recipients) : PeerMessage;
+
+/// <summary>Recipient to the sender and the other recipients: my answer, replacing any earlier one.</summary>
+public sealed record PollVoteMessage(Guid PollId, int Option) : PeerMessage;
 
 /// <summary>Lobby member to everyone: my avatar changed. The first one travels in the Hello.</summary>
 public sealed record ProfileMessage(PlayerProfile Profile) : PeerMessage;

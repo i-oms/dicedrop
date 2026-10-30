@@ -7,7 +7,7 @@ using Ludo.Presentation.Wpf.Views;
 namespace Ludo.Presentation.Wpf.Presenters;
 
 /// <summary>
-/// Shows other players' chat lines, nudges and game invites in a corner pop-up while the main window is
+/// Shows other players' chat lines, nudges, game invites and notifications in a corner pop-up while the main window is
 /// minimised, hidden in the tray or behind other windows. Bringing the game back to the front dismisses it;
 /// clicking it opens the conversation the latest line belongs to.
 /// </summary>
@@ -35,7 +35,16 @@ internal sealed class ChatToastController
         presenter.InviteReceived += invite => Show(
             new ToastLine(PersonViewModel.InitialsOf(invite.From), null, null, $"{invite.From} · game invite", $"wants to play {invite.GameName}. Open DiceDrop to join in."),
             conversation: string.Empty);
+        presenter.PollActivity += OnPollActivity;
         mainWindow.Activated += (_, _) => _toast?.Dismiss();
+    }
+
+    private void OnPollActivity(PollActivityView activity)
+    {
+        var person = _personOf(activity.FromKey);
+        Show(
+            new ToastLine(PersonViewModel.InitialsOf(activity.From), person?.Color, person?.Photo, $"{activity.From} · {(activity.IsNew ? "notification" : "answered")}", activity.Text),
+            conversation: string.Empty);
     }
 
     private void OnChatReceived(ChatLineView line)

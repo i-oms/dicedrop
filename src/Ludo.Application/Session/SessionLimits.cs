@@ -9,6 +9,12 @@ public static class SessionLimits
 
     public const int MaxChatLength = 500;
 
+    public const int MinPollOptions = 2;
+
+    public const int MaxPollOptions = 6;
+
+    public const int MaxPollOptionLength = 30;
+
     /// <summary>Avatar photos travel to every peer in the Hello, so they stay small.</summary>
     public const int MaxPhotoBytes = 64 * 1024;
 
