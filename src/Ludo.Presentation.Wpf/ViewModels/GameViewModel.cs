@@ -10,7 +10,11 @@ public sealed record SeatItem(string Name, Brush Color, string Detail, bool IsCu
 
 public sealed class GameViewModel : ObservableObject
 {
+    /// <summary>Long enough for the die to settle and its face to be read before the pawn sets off.</summary>
+    private static readonly TimeSpan ForcedMoveDelay = TimeSpan.FromSeconds(1.4);
+
     private readonly AsyncCommand _rollCommand;
+    private int? _forcedMoveRoll;
     private Guid? _matchId;
     private GameStateView? _game;
     private IReadOnlyList<SeatItem> _seats = [];
@@ -164,6 +168,7 @@ public sealed class GameViewModel : ObservableObject
     internal void Clear()
     {
         _matchId = null;
+        _forcedMoveRoll = null;
         Game = null;
     }
 
@@ -179,6 +184,7 @@ public sealed class GameViewModel : ObservableObject
         {
             Game = null;
             _matchId = match.Id;
+            _forcedMoveRoll = null;
         }
 
         Game = game;
@@ -214,6 +220,7 @@ public sealed class GameViewModel : ObservableObject
             GamePhaseView.Over => "Game over",
             GamePhaseView.Rolling => game.IsLocalTurn ? "Rolling…" : $"{current.Name} is rolling…",
             GamePhaseView.WaitingForRoll => game.IsLocalTurn ? "Your turn: roll the dice" : $"{current.Name} is about to roll",
+            _ when game.ForcedToken is not null => "Moving your pawn…",
             _ => game.IsLocalTurn ? "Pick one of your bouncing pawns" : $"{current.Name} is choosing a move",
         };
 
@@ -221,5 +228,21 @@ public sealed class GameViewModel : ObservableObject
         Ranking = string.Join(
             Environment.NewLine,
             game.Seats.Where(s => s.Rank is not null).OrderBy(s => s.Rank).Select(s => $"{s.Rank}. {s.Name}"));
+
+        if (game.ForcedToken is { } token && _forcedMoveRoll != game.RollCount)
+        {
+            _forcedMoveRoll = game.RollCount;
+            PlayForcedMove(match.Id, game.RollCount, token);
+        }
+    }
+
+    /// <summary>Plays the move after a pause, unless the pawn was clicked or the board was left in the meantime.</summary>
+    private async void PlayForcedMove(Guid matchId, int roll, int token)
+    {
+        await Task.Delay(ForcedMoveDelay);
+        if (_matchId == matchId && Game is { ForcedToken: not null } game && game.RollCount == roll)
+        {
+            MoveCommand.Execute(token);
+        }
     }
 }

@@ -51,6 +51,10 @@ public sealed class LudoGame
 
     public IReadOnlyList<Move> LegalMoves => _legalMoves;
 
+    /// <summary>The move to play when the roll leaves no real choice: all legal moves start from the same spot, so they are alike.</summary>
+    public Move? ForcedMove =>
+        _legalMoves.Count > 0 && _legalMoves.TrueForAll(m => m.From == _legalMoves[0].From) ? _legalMoves[0] : null;
+
     public IReadOnlyList<PlayerId> Ranking => _ranking;
 
     public static LudoGame Start(Guid id, IReadOnlyList<(PlayerId Id, string Name)> seats, GameRules rules)

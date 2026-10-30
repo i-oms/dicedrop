@@ -174,6 +174,7 @@ public sealed record SeatView(
     IReadOnlyList<TokenView> Tokens);
 
 /// <param name="RollCount">Rolls made so far, so the UI can tell a new roll from a repeat of the same face.</param>
+/// <param name="ForcedToken">Our token to play when this roll leaves us no real choice, otherwise null.</param>
 public sealed record GameStateView(
     BoardLayoutView Board,
     IReadOnlyList<SeatView> Seats,
@@ -182,4 +183,5 @@ public sealed record GameStateView(
     bool IsLocalTurn,
     int? LastRoll,
     int RollCount,
+    int? ForcedToken,
     IReadOnlyList<string> WaitingFor);

@@ -172,6 +172,7 @@ internal static class SnapshotBuilder
             isLocalTurn,
             game.LastRoll?.Value,
             game.RollCount,
+            isLocalTurn ? game.ForcedMove?.TokenIndex : null,
             waitingFor);
     }
 

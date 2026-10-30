@@ -132,6 +132,77 @@ public sealed class LudoGameTests
     }
 
     [Fact]
+    public void Entering_from_a_full_yard_is_forced()
+    {
+        var game = TwoPlayerGame();
+
+        game.Roll(_alice, new DiceValue(6));
+
+        Assert.Equal(4, game.LegalMoves.Count);
+        Assert.Equal(0, game.ForcedMove?.TokenIndex);
+    }
+
+    [Fact]
+    public void A_lone_token_is_forced_on_a_roll_that_cannot_enter()
+    {
+        var game = TwoPlayerGame();
+        Play(game, _alice, 6, token: 2);
+
+        game.Roll(_alice, new DiceValue(3));
+
+        Assert.Equal(2, game.ForcedMove?.TokenIndex);
+    }
+
+    [Fact]
+    public void A_six_with_a_token_out_and_tokens_in_the_yard_is_a_choice()
+    {
+        var game = TwoPlayerGame();
+        Play(game, _alice, 6, token: 0);
+
+        game.Roll(_alice, new DiceValue(6));
+
+        Assert.Null(game.ForcedMove);
+    }
+
+    [Fact]
+    public void Tokens_on_different_squares_are_a_choice()
+    {
+        var game = TwoPlayerGame();
+        Play(game, _alice, 6, token: 0);
+        Play(game, _alice, 6, token: 1);
+        Play(game, _alice, 2, token: 1);
+        game.Roll(_bob, new DiceValue(1));
+
+        game.Roll(_alice, new DiceValue(3));
+
+        Assert.Null(game.ForcedMove);
+    }
+
+    [Fact]
+    public void Tokens_stacked_on_one_square_are_forced()
+    {
+        var game = TwoPlayerGame();
+        Play(game, _alice, 6, token: 0);
+        Play(game, _alice, 6, token: 1);
+        Play(game, _alice, 1, token: 0);
+        game.Roll(_bob, new DiceValue(1));
+        Play(game, _alice, 6, token: 1); // Token 1 passes token 0, then token 0 catches it up.
+        Play(game, _alice, 5, token: 0);
+        game.Roll(_bob, new DiceValue(1));
+
+        game.Roll(_alice, new DiceValue(3));
+
+        Assert.Equal(2, game.LegalMoves.Count);
+        Assert.Equal(0, game.ForcedMove?.TokenIndex);
+    }
+
+    [Fact]
+    public void No_move_is_forced_before_the_roll()
+    {
+        Assert.Null(TwoPlayerGame().ForcedMove);
+    }
+
+    [Fact]
     public void Moving_out_of_turn_is_rejected()
     {
         var game = TwoPlayerGame();
