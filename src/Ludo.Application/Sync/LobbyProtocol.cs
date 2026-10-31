@@ -10,9 +10,19 @@ namespace Ludo.Application.Sync;
 /// are run by whoever starts them. If the host leaves, the longest-standing member takes over, so the
 /// lobby and any game in it carry on.
 /// </summary>
-internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matches)
+internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matches, SessionExecutor executor)
 {
+    /// <summary>
+    /// One join makes every member report its links, and each report used to send the whole roster to
+    /// everyone, so these two go out at most this often.
+    /// </summary>
+    private static readonly TimeSpan RosterInterval = TimeSpan.FromMilliseconds(250);
+
     private DateTimeOffset? _lastCloseOut;
+
+    private ExecutorThrottle RosterThrottle => field ??= new(executor, context.Time, RosterInterval, SendRoster);
+
+    private ExecutorThrottle ConnectivityThrottle => field ??= new(executor, context.Time, RosterInterval, SendConnectivity);
 
     public void OnPeerConnected(PeerConnection connection)
     {
@@ -55,7 +65,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             return Reject(from, "Invalid player name.");
         }
 
-        if (context.IsHost && context.Roster.Count >= SessionContext.MaxPlayers && !context.Roster.Exists(r => r.Id == from))
+        if (context.IsHost && context.Roster.Count >= SessionContext.MaxLobbyMembers && !context.Roster.Exists(r => r.Id == from))
         {
             return Reject(from, "The lobby is full.");
         }
@@ -125,7 +135,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         }
 
         context.Roster.Clear();
-        foreach (var entry in state.Roster.Take(SessionContext.MaxPlayers))
+        foreach (var entry in state.Roster.Take(SessionContext.MaxLobbyMembers))
         {
             context.Roster.Add(new RosterSeat(entry.Id, entry.Name) { Ready = entry.Ready });
         }
@@ -368,9 +378,17 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         }
     }
 
-    /// <summary>Host side: recomputes who is fully meshed, then shares the roster and refreshes the LAN beacon.</summary>
-    public void BroadcastRoster()
+    /// <summary>Host side: asks for the roster to go out, now or as soon as <see cref="RosterInterval"/> allows.</summary>
+    public void BroadcastRoster() => RosterThrottle.Request();
+
+    /// <summary>Recomputes who is fully meshed, then shares the roster and refreshes the LAN beacon.</summary>
+    private void SendRoster()
     {
+        if (context.Stage != SessionStage.Lobby || !context.IsHost)
+        {
+            return;
+        }
+
         var memberIds = context.Roster.Select(r => r.Id).ToArray();
         var hostLinks = context.Peers.Values.Where(p => p.IsGreeted).Select(p => p.Id).ToHashSet();
         foreach (var seat in context.Roster)
@@ -388,8 +406,11 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             context.LocalName,
             context.Network.ListenPort,
             context.Roster.Count,
-            SessionContext.MaxPlayers,
+            SessionContext.MaxLobbyMembers,
             ProtocolInfo.Version));
+
+        // Readiness just changed, and this may be running after the message that asked for it was handled.
+        context.Publish();
     }
 
     /// <summary>
@@ -429,9 +450,11 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         }
     }
 
-    private void ReportConnectivity()
+    private void ReportConnectivity() => ConnectivityThrottle.Request();
+
+    private void SendConnectivity()
     {
-        if (context.HostId is { } host)
+        if (context.Stage == SessionStage.Lobby && context.HostId is { } host)
         {
             var linked = context.Peers.Values.Where(p => p.IsGreeted).Select(p => p.Id).ToArray();
             context.Network.Send(host, new PeerStatusMessage(linked));

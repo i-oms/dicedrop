@@ -62,6 +62,65 @@ public sealed class PeerSessionTests
     }
 
     [Fact]
+    public async Task A_lobby_holds_more_people_than_a_game_and_a_full_game_refuses_more()
+    {
+        var peers = Enumerable.Range(0, 12).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            await StartPairAsync(peers[0], peers[1], peers);
+
+            // With two people busy, this invite names the nine who are free: more than a game seats.
+            var initiator = peers[2];
+            await initiator.App.ProposeGame.ExecuteAsync();
+            var id = initiator.Latest.Match!.Id;
+            await WaitUntil(() => peers.All(p => p.Latest.Matches.Any(m => m.Id == id)), "invite did not reach everyone");
+
+            var free = peers[3..];
+            foreach (var peer in free[..7])
+            {
+                await peer.App.AcceptInvite.ExecuteAsync(id);
+            }
+
+            var late = free[7];
+            await WaitUntil(
+                () => late.Latest.Matches.Single(m => m.Id == id).Invitees.Count(i => i.Answer == InviteAnswer.Accepted) == SessionContext.MaxGamePlayers,
+                "answers never arrived");
+            await Assert.ThrowsAsync<SessionException>(() => late.App.AcceptInvite.ExecuteAsync(id));
+
+            await WaitUntil(() => initiator.Latest.Match!.CanStart, "the game never became ready");
+            await initiator.App.StartGame.ExecuteAsync();
+            await WaitUntil(() => free[..7].All(p => p.Latest.Match is { IsPlaying: true } m && m.Id == id), "a player never started");
+            Assert.Equal(SessionContext.MaxGamePlayers, initiator.Latest.Match!.Game!.Seats.Count);
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task The_host_shares_the_roster_at_a_limited_rate_while_people_join()
+    {
+        var network = new FilteredNetwork(new TcpPeerNetwork());
+        var peers = Enumerable.Range(0, 8)
+            .Select(i => i == 0 ? new TestPeer("Host", network: network) : new TestPeer($"P{i}"))
+            .ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+
+            var sent = network.RosterSentAt;
+            Assert.True(sent.Count > 1);
+            Assert.All(sent.Zip(sent.Skip(1)), pair => Assert.True(pair.Second - pair.First >= TimeSpan.FromMilliseconds(200)));
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
     public async Task Someone_rejoining_before_their_old_link_drops_keeps_one_lobby_entry()
     {
         var id = Ludo.Domain.Players.PlayerId.New();
@@ -1170,6 +1229,20 @@ public sealed class PeerSessionTests
         private EventHandler<IncomingMessage>? _received;
 
         private readonly HashSet<Ludo.Domain.Players.PlayerId> _muted = [];
+        private readonly List<TimeSpan> _rosterSentAt = [];
+        private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+
+        /// <summary>When each roster went out, oldest first.</summary>
+        public IReadOnlyList<TimeSpan> RosterSentAt
+        {
+            get
+            {
+                lock (_rosterSentAt)
+                {
+                    return _rosterSentAt.ToArray();
+                }
+            }
+        }
 
         /// <summary>Delivers a message as if the peer had sent it, the way a modified client could.</summary>
         public void Inject(Ludo.Domain.Players.PlayerId from, PeerMessage message) =>
@@ -1219,7 +1292,18 @@ public sealed class PeerSessionTests
 
         public void Send(Ludo.Domain.Players.PlayerId peer, PeerMessage message) => inner.Send(peer, message);
 
-        public void Broadcast(PeerMessage message) => inner.Broadcast(message);
+        public void Broadcast(PeerMessage message)
+        {
+            if (message is LobbyStateMessage)
+            {
+                lock (_rosterSentAt)
+                {
+                    _rosterSentAt.Add(_clock.Elapsed);
+                }
+            }
+
+            inner.Broadcast(message);
+        }
 
         public void Disconnect(Ludo.Domain.Players.PlayerId peer) => inner.Disconnect(peer);
 

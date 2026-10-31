@@ -10,6 +10,12 @@ internal sealed class PeerLink
 {
     public const int MaxFrameBytes = 1 << 20;
 
+    // A PC that loses power or Wi-Fi sends no goodbye, and a game waiting on its dice share sends nothing
+    // that could fail. These probes end such a link after about 20 seconds of silence.
+    private const int KeepAliveIdleSeconds = 10;
+    private const int KeepAliveIntervalSeconds = 2;
+    private const int KeepAliveRetries = 5;
+
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
     private readonly Channel<byte[]> _outbox = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
@@ -20,6 +26,11 @@ internal sealed class PeerLink
     {
         _client = client;
         _stream = client.GetStream();
+        var socket = client.Client;
+        socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+        socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, KeepAliveIdleSeconds);
+        socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, KeepAliveIntervalSeconds);
+        socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, KeepAliveRetries);
         RemoteId = remoteId;
         RemoteHost = remoteHost;
         RemoteListenPort = remoteListenPort;

@@ -95,7 +95,7 @@ internal sealed class PollProtocol(SessionContext context)
             return DispatchResult.Ignored;
         }
 
-        var recipients = message.Recipients.Distinct().Take(SessionContext.MaxPlayers).ToArray();
+        var recipients = message.Recipients.Distinct().Take(SessionContext.MaxLobbyMembers).ToArray();
         context.AddPoll(new PollState(message.PollId, from, text, labels, recipients));
         context.Presenter.PresentPollActivity(new PollActivityView(
             message.PollId,

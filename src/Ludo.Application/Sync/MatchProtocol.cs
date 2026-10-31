@@ -106,6 +106,12 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
                 throw new SessionException("Finish or leave your game before joining another.");
             }
 
+            // An open invite can reach more people than the game seats; the first to say yes get in.
+            if (match.Replies.Values.Count(r => r.Accepted) >= (GameCatalog.Find(match.GameId) ?? GameCatalog.Ludo).MaxPlayers)
+            {
+                throw new SessionException("That game is full.");
+            }
+
             ReleaseOtherInvites(match, $"You joined {context.NameOf(match.Initiator)}'s game, so your invite was withdrawn.");
         }
 
@@ -132,7 +138,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
 
         var seats = players
             .Prepend(context.Roster.Find(r => r.Id == context.LocalId) ?? new RosterSeat(context.LocalId, context.LocalName))
-            .Take(SessionContext.MaxPlayers)
+            .Take(SessionContext.MaxGamePlayers)
             .Select(r => new SeatAssignment(r.Id, r.Name, match.Replies[r.Id].Anchor!))
             .ToArray();
         var start = new GameStartMessage(match.Id, GameRules.Classic, seats);
@@ -249,7 +255,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
             || context.PastMatches.Contains(proposal.MatchId)
             || context.FindMatch(proposal.MatchId) is not null
             || GameCatalog.Find(proposal.GameId) is not { } game
-            || proposal.Invitees is { Count: 0 or > SessionContext.MaxPlayers })
+            || proposal.Invitees is { Count: 0 or > SessionContext.MaxLobbyMembers })
         {
             return DispatchResult.Ignored;
         }
@@ -559,7 +565,7 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         LudoGame game;
         try
         {
-            if (start.Seats.Count is 0 or > SessionContext.MaxPlayers || start.Seats[0].Id != match.Initiator)
+            if (start.Seats.Count is 0 or > SessionContext.MaxGamePlayers || start.Seats[0].Id != match.Initiator)
             {
                 throw new DomainException("the seating is invalid.");
             }

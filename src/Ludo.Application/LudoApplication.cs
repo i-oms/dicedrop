@@ -27,7 +27,7 @@ public sealed class LudoApplication : IAsyncDisposable
         var context = new SessionContext(network, discovery, crypto, presenter, time, localId ?? PlayerId.New());
         var gameplay = new GameplayProtocol(context);
         var matches = new MatchProtocol(context, gameplay);
-        var lobby = new LobbyProtocol(context, matches);
+        var lobby = new LobbyProtocol(context, matches, _executor);
         var polls = new PollProtocol(context);
         var router = new PeerMessageRouter(context, _executor, lobby, matches, gameplay, polls);
 

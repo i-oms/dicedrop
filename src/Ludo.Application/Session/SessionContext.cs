@@ -19,7 +19,10 @@ internal sealed class SessionContext(
     TimeProvider time,
     PlayerId localId)
 {
-    public const int MaxPlayers = 8;
+    /// <summary>How many people can share one lobby; games inside it are smaller.</summary>
+    public const int MaxLobbyMembers = 100;
+
+    public const int MaxGamePlayers = 8;
     private const int MaxLogEntries = 200;
     private const int MaxChatEntries = 200;
     private const int MaxDirectEntries = 200;

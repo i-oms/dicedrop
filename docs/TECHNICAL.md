@@ -21,7 +21,7 @@ Presentation.Wpf ──► Application ──► Domain
 
 UI never touches domain. It receives immutable read models `SessionSnapshot` via `ISessionPresenter`.
 
-The wire protocol is versioned (`ProtocolInfo.Version`, currently **9**: profiles, private chat, nudges, game invites, invite acknowledgements, group decisions, taking group decisions back, closing for everyone, game chat and watcher lists). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
+The wire protocol is versioned (`ProtocolInfo.Version`, currently **10**: profiles, private chat, nudges, game invites, invite acknowledgements, group decisions, taking group decisions back, closing for everyone, game chat, watcher lists and lobbies larger than a game). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
 
 **Transport security:** peer traffic is plain JSON over TCP on the local network. It is not encrypted or authenticated beyond the game handshake; fair dice and lockstep validation protect game integrity, not confidentiality.
 
@@ -29,6 +29,8 @@ The wire protocol is versioned (`ProtocolInfo.Version`, currently **9**: profile
 
 ### Mesh, not server
 Every member connects to every other. Host keeps member list and greets newcomers. On host leave, first member in join order becomes host — deterministic because all peers hold same list.
+
+A lobby holds up to 100 members (`MaxLobbyMembers`) and a game up to 8 (`MaxGamePlayers`). An open invite can reach more people than the game seats, so accepting is refused once it looks full, and if answers cross, the start seats the first 8 in lobby order. A join makes every member report its links, so roster and link reports go out at most every 250 ms (`ExecutorThrottle`). Links use TCP keepalive, so a PC that vanishes without closing its connection is dropped after about 20 seconds.
 
 ### Games inside lobby
 Proposer = initiator. A lobby can hold several invites and games at once, each with its own board, dice chain, history and log, and every message names its match. Invites never compete, but each member is in at most one game: a member seated in a running game or with an invite of their own open can't propose, proposals skip members known to be playing, and those playing can't accept until their game ends. Saying yes to an invite takes back a yes to any other and withdraws the member's own open invite. Replies can cross a start, so a peer seated in a start it has given up on sends a leave and the game carries on without it. A proposal or replay from a member whose earlier game hasn't ended here yet is parked, because the news of its end may still be on the way. Initiator seats `self + accepted` and sends start message. Only initiator can stop. Game ends if initiator leaves lobby. The last 4 ended games are kept per lobby so boards stay viewable.
