@@ -199,6 +199,17 @@ internal sealed class SessionContext(
         Presenter.PresentChat(line);
     }
 
+    /// <summary>Adds a line to a game's group chat. Only those in the game, playing or watching, get a pop-up for it.</summary>
+    public void AddMatchChat(MatchState match, PlayerId sender, string text)
+    {
+        var line = new ChatLineView(KeyOf(sender), NameOf(sender), text, sender == LocalId, Time.GetLocalNow(), ChatLineKind.Message, Conversation: null, match.Id);
+        match.AddChat(line);
+        if (match.IsPlaying || match.Viewers.Contains(LocalId))
+        {
+            Presenter.PresentChat(line);
+        }
+    }
+
     /// <summary>Adds a line to our private conversation with <paramref name="peer"/>.</summary>
     public void AddDirect(PlayerId peer, PlayerId sender, string text, ChatLineKind kind)
     {

@@ -21,7 +21,7 @@ Presentation.Wpf ──► Application ──► Domain
 
 UI never touches domain. It receives immutable read models `SessionSnapshot` via `ISessionPresenter`.
 
-The wire protocol is versioned (`ProtocolInfo.Version`, currently **8**: profiles, private chat, nudges, game invites, invite acknowledgements, group decisions, taking group decisions back, closing for everyone). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
+The wire protocol is versioned (`ProtocolInfo.Version`, currently **9**: profiles, private chat, nudges, game invites, invite acknowledgements, group decisions, taking group decisions back, closing for everyone, game chat and watcher lists). Peers on a different version can't join each other's lobbies, so any change to `PeerMessages`, the serializer or the beacon must bump it.
 
 **Transport security:** peer traffic is plain JSON over TCP on the local network. It is not encrypted or authenticated beyond the game handshake; fair dice and lockstep validation protect game integrity, not confidentiality.
 
@@ -38,6 +38,11 @@ A group decision (`PollMessage`) is sent only to the members its sender picked, 
 
 ### Spectators
 Spectators don't participate in dice protocol. Initiator keeps append-only log of rolls/moves/drop-outs and streams to non-players. Late joiners replay log on fresh board. Gap detection -> re-request. A replay of an unknown match is only accepted from its seat 0 and never ends an open invite; it waits until the invite is gone. A peer seated in a running game ignores `LobbyClosedMessage` and `JoinRejectedMessage`.
+
+Opening or closing a board sends `MatchWatchMessage` to the lobby, and a newly greeted member is told which active board each peer has open. A watcher is a member with the board open who has no active seat in it, so everyone else following the record in the background isn't listed.
+
+### Game chat
+Each game has its own group chat beside the board (`MatchChatMessage`). Lines go to the whole lobby and are kept with the match, so anyone opening the board later can read back, without a race against the watcher list. Only players and those with the board open get pop-ups. Members who join the lobby later don't get earlier lines. Like all chat it lives in memory, and it goes when its match is trimmed.
 
 ### Deterministic lockstep
 Ludo is turn-based — only current player may act. Each peer applies roll/move to its own `LudoGame` and validates against `GameRules`. Illegal/out-of-turn rejected locally.

@@ -45,6 +45,8 @@ public sealed class LudoApplication : IAsyncDisposable
         AutoLobby = new AutoLobbyUseCase(discovery, context, _executor, HostLobby, JoinLobby, time, diagnostics ?? NullDiagnosticLog.Instance);
         RenamePlayer = new RenamePlayerUseCase(context, _executor, lobby, AutoLobby);
         SendChat = new SendChatUseCase(context, _executor, lobby);
+        SendMatchChat = new SendMatchChatUseCase(context, _executor, matches);
+        WatchGame = new WatchGameUseCase(context, _executor, matches);
         SendDirectChat = new SendDirectChatUseCase(context, _executor, lobby);
         Nudge = new NudgeUseCase(context, _executor, lobby);
         UpdateProfile = new UpdateProfileUseCase(context, _executor, lobby);
@@ -86,6 +88,12 @@ public sealed class LudoApplication : IAsyncDisposable
     public RenamePlayerUseCase RenamePlayer { get; }
 
     public SendChatUseCase SendChat { get; }
+
+    /// <summary>Anyone with a board open: write to that game's players and watchers.</summary>
+    public SendMatchChatUseCase SendMatchChat { get; }
+
+    /// <summary>Says which game's board is on screen, if any.</summary>
+    public WatchGameUseCase WatchGame { get; }
 
     public SendDirectChatUseCase SendDirectChat { get; }
 

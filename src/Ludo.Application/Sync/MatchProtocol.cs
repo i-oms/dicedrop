@@ -170,6 +170,79 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
         context.EndMatch(match, match.Phase == MatchPhase.Inviting ? "You withdrew the invite." : "You stopped the game.");
     }
 
+    public void ChatLocal(Guid matchId, string text)
+    {
+        RequireLobby();
+        if (context.FindMatch(matchId) is not { Game: not null } match)
+        {
+            throw new SessionException("That game is no longer available.");
+        }
+
+        var line = SessionContext.NormalizeChat(text)
+            ?? throw new SessionException($"Messages must be 1 to {SessionLimits.MaxChatLength} characters.");
+        context.Network.Broadcast(new MatchChatMessage(match.Id, line));
+        context.AddMatchChat(match, context.LocalId, line);
+    }
+
+    /// <summary>Tells the lobby which board we have open now; null when it's none.</summary>
+    public void WatchLocal(Guid? matchId)
+    {
+        if (context.Stage != SessionStage.Lobby)
+        {
+            return;
+        }
+
+        foreach (var old in context.Matches.Where(m => m.Id != matchId && m.Viewers.Remove(context.LocalId)))
+        {
+            context.Network.Broadcast(new MatchWatchMessage(old.Id, false));
+        }
+
+        if (matchId is { } id && context.FindMatch(id) is { } match && match.Viewers.Add(context.LocalId))
+        {
+            context.Network.Broadcast(new MatchWatchMessage(match.Id, true));
+        }
+    }
+
+    public DispatchResult OnChat(PlayerId from, MatchChatMessage chat)
+    {
+        if (!IsGreeted(from) || SessionContext.NormalizeChat(chat.Text) is not { } line)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        if (Find(chat.MatchId) is not { } match)
+        {
+            return Unknown(chat.MatchId);
+        }
+
+        context.AddMatchChat(match, from, line);
+        return DispatchResult.Handled;
+    }
+
+    public DispatchResult OnWatch(PlayerId from, MatchWatchMessage watch)
+    {
+        if (!IsGreeted(from))
+        {
+            return DispatchResult.Ignored;
+        }
+
+        if (Find(watch.MatchId) is not { } match)
+        {
+            return Unknown(watch.MatchId);
+        }
+
+        if (watch.IsWatching)
+        {
+            match.Viewers.Add(from);
+        }
+        else
+        {
+            match.Viewers.Remove(from);
+        }
+
+        return DispatchResult.Handled;
+    }
+
     public DispatchResult OnProposal(PlayerId from, MatchProposalMessage proposal)
     {
         if (!IsGreeted(from) || proposal.ChainAnchor is not { Length: HashChain.ValueLength }
@@ -423,11 +496,26 @@ internal sealed class MatchProtocol(SessionContext context, GameplayProtocol gam
                 context.Network.Send(member, new MatchReplyMessage(match.Id, true, reply.Anchor));
             }
         }
+
+        foreach (var match in context.Matches)
+        {
+            // Someone back on a new link starts with no board open, whatever their old link last said.
+            match.Viewers.Remove(member);
+            if (match.IsActive && match.Viewers.Contains(context.LocalId))
+            {
+                context.Network.Send(member, new MatchWatchMessage(match.Id, true));
+            }
+        }
     }
 
     /// <summary>The initiator leaving ends its match; anyone else just drops out of the invite.</summary>
     public void OnPeerGone(PlayerId peer)
     {
+        foreach (var match in context.Matches)
+        {
+            match.Viewers.Remove(peer);
+        }
+
         foreach (var match in context.Matches.Where(m => m.IsActive))
         {
             if (peer == match.Initiator)

@@ -182,6 +182,9 @@
                                 <DataTrigger Binding="{Binding IsLobby}" Value="True">
                                     <Setter Property="Text" Value="Everyone in the lobby sees this chat. Nothing is saved." />
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding IsGameChat}" Value="True">
+                                    <Setter Property="Text" Value="For this game's players and watchers. Nothing is saved." />
+                                </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </TextBlock.Style>

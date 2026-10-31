@@ -8,12 +8,19 @@ namespace Ludo.Presentation.Wpf.ViewModels;
 
 public sealed record SeatItem(string Name, Brush Color, string Detail, bool IsCurrent, bool IsLocal, bool HasLeft);
 
+public sealed record WatcherItem(PersonViewModel Person, string Name);
+
 public sealed class GameViewModel : ObservableObject
 {
     /// <summary>Long enough for the die to settle and its face to be read before the pawn sets off.</summary>
     private static readonly TimeSpan ForcedMoveDelay = TimeSpan.FromSeconds(1.4);
 
+    private readonly LudoApplication _app;
+    private readonly Action<Exception> _onError;
+    private readonly LobbyViewModel _lobby;
     private readonly AsyncCommand _rollCommand;
+    private ConversationViewModel? _chat;
+    private IReadOnlyList<WatcherItem> _watchers = [];
     private int? _forcedMoveRoll;
     private Guid? _matchId;
     private GameStateView? _game;
@@ -34,7 +41,9 @@ public sealed class GameViewModel : ObservableObject
 
     internal GameViewModel(LudoApplication app, Action<Exception> onError, LobbyViewModel lobby, Action backToLobby)
     {
-        Lobby = lobby;
+        _app = app;
+        _onError = onError;
+        _lobby = lobby;
         _rollCommand = new AsyncCommand(_ => app.RollDice.ExecuteAsync(), onError, _ => CanRoll);
         MoveCommand = new AsyncCommand(
             token => token is int index ? app.MoveToken.ExecuteAsync(index) : Task.CompletedTask,
@@ -50,8 +59,30 @@ public sealed class GameViewModel : ObservableObject
         BackCommand = new AsyncCommand(_ => { backToLobby(); return Task.CompletedTask; }, onError);
     }
 
-    /// <summary>For the chat panel beside the board.</summary>
-    public LobbyViewModel Lobby { get; }
+    /// <summary>The group chat of the game on screen, for its players and watchers.</summary>
+    public ConversationViewModel? Chat
+    {
+        get => _chat;
+        private set => SetProperty(ref _chat, value);
+    }
+
+    /// <summary>Lobby members with this board open who don't hold a seat in it.</summary>
+    public IReadOnlyList<WatcherItem> Watchers
+    {
+        get => _watchers;
+        private set
+        {
+            if (SetProperty(ref _watchers, value))
+            {
+                OnPropertyChanged(nameof(HasWatchers));
+                OnPropertyChanged(nameof(WatchersTitle));
+            }
+        }
+    }
+
+    public bool HasWatchers => Watchers.Count > 0;
+
+    public string WatchersTitle => $"WATCHING · {Watchers.Count}";
 
     public GameStateView? Game
     {
@@ -186,6 +217,17 @@ public sealed class GameViewModel : ObservableObject
             _matchId = match.Id;
             _forcedMoveRoll = null;
         }
+
+        // Kept when only the screen changes, so a half-typed line survives a trip to the lobby.
+        if (Chat?.MatchId != match.Id)
+        {
+            Chat = new ConversationViewModel(null, _app, _onError, match.Id) { IsSelected = true };
+        }
+
+        Chat.Sync(match.Chat, _lobby.SenderOf);
+        Watchers = match.Watchers
+            .Select(w => new WatcherItem(_lobby.PersonOf(w.Key, w.Name), w.IsLocal ? $"{w.Name} (you)" : w.Name))
+            .ToArray();
 
         Game = game;
         Seats = game.Seats.Select(s => new SeatItem(

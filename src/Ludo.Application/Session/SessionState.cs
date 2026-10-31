@@ -114,8 +114,10 @@ internal sealed record MatchReply(bool Accepted, byte[]? Anchor);
 internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IReadOnlySet<PlayerId>? invitees)
 {
     private const int MaxLogEntries = 200;
+    private const int MaxChatEntries = 200;
 
     private readonly List<string> _log = [];
+    private readonly List<ChatLineView> _chat = [];
 
     public Guid Id { get; } = id;
 
@@ -156,6 +158,12 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
     /// <summary>What happened in this game, oldest first, so a board never shows another game's moves.</summary>
     public IReadOnlyList<string> Log => _log;
 
+    /// <summary>This game's group chat, oldest first. Held in memory only, like the lobby's.</summary>
+    public IReadOnlyList<ChatLineView> Chat => _chat;
+
+    /// <summary>Everyone with this game's board open, us included. Those holding a seat are listed as players instead.</summary>
+    public HashSet<PlayerId> Viewers { get; } = [];
+
     public string? EndReason { get; set; }
 
     /// <summary>Spectator side: we asked the initiator for a fresh replay and are waiting for it.</summary>
@@ -167,6 +175,15 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
         if (_log.Count > MaxLogEntries)
         {
             _log.RemoveRange(0, _log.Count - MaxLogEntries);
+        }
+    }
+
+    public void AddChat(ChatLineView line)
+    {
+        _chat.Add(line);
+        if (_chat.Count > MaxChatEntries)
+        {
+            _chat.RemoveRange(0, _chat.Count - MaxChatEntries);
         }
     }
 

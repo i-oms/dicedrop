@@ -370,6 +370,54 @@ public sealed class PeerSessionTests
     }
 
     [Fact]
+    public async Task A_games_chat_stays_with_it_and_its_watchers_are_listed()
+    {
+        var peers = Enumerable.Range(0, 4).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            var port = await FormLobbyAsync(peers);
+            var id = await StartGroupAsync(peers[0], peers[1..2], peers);
+            MatchView MatchOf(TestPeer peer) => peer.Latest.Matches.Single(m => m.Id == id);
+
+            await peers[1].App.SendMatchChat.ExecuteAsync(id, "good luck");
+            await WaitUntil(() => peers.All(p => MatchOf(p).Chat.Count == 1), "the game's chat did not arrive");
+            Assert.All(peers, p => Assert.Empty(p.Latest.Chat));
+            Assert.Equal(id, MatchOf(peers[3]).Chat[0].MatchId);
+
+            // Only those with the board open are listed; a player with it open already has a seat.
+            await peers[2].App.WatchGame.ExecuteAsync(id);
+            await peers[1].App.WatchGame.ExecuteAsync(id);
+            await WaitUntil(() => peers.All(p => MatchOf(p).Watchers.Count == 1 && MatchOf(p).Watchers[0].Name == "P2"), "the watcher was not listed");
+            Assert.True(MatchOf(peers[2]).Watchers[0].IsLocal);
+
+            // A newcomer hears who is already watching.
+            var late = new TestPeer("Late");
+            try
+            {
+                await late.App.JoinLobby.ExecuteAsync(late.Name, "127.0.0.1", port);
+                await WaitUntil(() => late.Latest.Matches.Any(m => m.Id == id) && MatchOf(late).Watchers.Any(w => w.Name == "P2"), "the newcomer did not hear of the watcher");
+            }
+            finally
+            {
+                await late.App.DisposeAsync();
+            }
+
+            await peers[2].App.WatchGame.ExecuteAsync(null);
+            await WaitUntil(() => peers.All(p => MatchOf(p).Watchers.Count == 0), "the watcher stayed listed after closing the board");
+
+            // Someone who goes away stops being listed.
+            await peers[3].App.WatchGame.ExecuteAsync(id);
+            await WaitUntil(() => peers.All(p => MatchOf(p).Watchers.Count == 1), "the second watcher was not listed");
+            await peers[3].App.LeaveSession.ExecuteAsync();
+            await WaitUntil(() => peers[..3].All(p => MatchOf(p).Watchers.Count == 0), "a watcher who left stayed listed");
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
     public async Task Eight_players_split_into_two_boards_of_four()
     {
         var peers = Enumerable.Range(0, 8).Select(i => new TestPeer($"P{i}")).ToArray();

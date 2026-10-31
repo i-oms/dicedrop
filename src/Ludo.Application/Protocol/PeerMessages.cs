@@ -5,7 +5,7 @@ namespace Ludo.Application.Protocol;
 
 public static class ProtocolInfo
 {
-    public const int Version = 8;
+    public const int Version = 9;
 
     /// <summary>
     /// Port a host listens on when it can. Peers never depend on it: if it is taken, the host falls back
@@ -93,6 +93,15 @@ public sealed record MatchStepMessage(Guid MatchId, int Index, MatchStep Step) :
 
 /// <summary>Spectator to initiator: my copy fell behind, send me the whole match again.</summary>
 public sealed record MatchSyncRequestMessage(Guid MatchId) : PeerMessage;
+
+/// <summary>
+/// Lobby member to everyone: one line of a game's group chat. Everyone keeps it with the match, so whoever
+/// opens the board later can read back. Peers keep it in memory only.
+/// </summary>
+public sealed record MatchChatMessage(Guid MatchId, string Text) : PeerMessage;
+
+/// <summary>Lobby member to everyone: I opened or closed this game's board.</summary>
+public sealed record MatchWatchMessage(Guid MatchId, bool IsWatching) : PeerMessage;
 
 /// <summary>Current player asks every other player to reveal its share of roll <see cref="RollIndex"/>.</summary>
 public sealed record RollRequestMessage(Guid MatchId, int RollIndex, string StateDigest) : PeerMessage;

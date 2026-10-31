@@ -105,7 +105,12 @@ internal static class SnapshotBuilder
             canStart,
             match.EndReason,
             match.Log.ToArray(),
-            match.Game is { } game ? BuildGame(context, match, game) : null);
+            match.Game is { } game ? BuildGame(context, match, game) : null,
+            context.Roster
+                .Where(r => match.Viewers.Contains(r.Id) && !match.IsActivePlayer(r.Id))
+                .Select(r => new WatcherView(SessionContext.KeyOf(r.Id), r.Name, r.Id == context.LocalId))
+                .ToArray(),
+            match.Chat.ToArray());
     }
 
     private static ProfileView ToView(Protocol.PlayerProfile profile) => new(profile.Color, profile.Photo);

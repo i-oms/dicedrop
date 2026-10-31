@@ -161,6 +161,10 @@ internal sealed class PeerMessageRouter
                 return _matches.OnStep(from, step);
             case MatchSyncRequestMessage request:
                 return _matches.OnSyncRequest(from, request);
+            case MatchChatMessage chat:
+                return _matches.OnChat(from, chat);
+            case MatchWatchMessage watch:
+                return _matches.OnWatch(from, watch);
             case RollRequestMessage request:
                 return _gameplay.OnRollRequest(from, request);
             case RevealMessage reveal:

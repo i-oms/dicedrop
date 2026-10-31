@@ -85,7 +85,8 @@ public enum ChatLineKind
 /// <param name="SenderKey">The sender's <see cref="MemberView.Key"/>.</param>
 /// <param name="Sender">The sender's name when the line was sent.</param>
 /// <param name="Time">When this PC sent or received it; peers do not share clocks.</param>
-/// <param name="Conversation">Null for the lobby chat, else the key of the other person in a private conversation.</param>
+/// <param name="Conversation">Null for a group chat, else the key of the other person in a private conversation.</param>
+/// <param name="MatchId">The game whose group chat this line belongs to; null for the lobby and private chats.</param>
 public sealed record ChatLineView(
     string SenderKey,
     string Sender,
@@ -93,7 +94,8 @@ public sealed record ChatLineView(
     bool IsLocal,
     DateTimeOffset Time,
     ChatLineKind Kind,
-    string? Conversation);
+    string? Conversation,
+    Guid? MatchId = null);
 
 /// <param name="PeerKey">The other person's key.</param>
 /// <param name="IsPresent">They are still in the lobby, so we can write to them.</param>
@@ -131,6 +133,8 @@ public sealed record InviteView(Guid MatchId, string From, string GameName);
 /// <param name="CanAnswer">The invite is open to us right now: we were invited and aren't playing another game.</param>
 /// <param name="CanStart">We are the initiator and enough players have said yes.</param>
 /// <param name="Log">What happened in this game, oldest first.</param>
+/// <param name="Watchers">Lobby members with the board open who don't hold a seat in it, us included.</param>
+/// <param name="Chat">This game's group chat, oldest first.</param>
 public sealed record MatchView(
     Guid Id,
     GameInfo GameType,
@@ -145,9 +149,13 @@ public sealed record MatchView(
     bool CanStart,
     string? EndReason,
     IReadOnlyList<string> Log,
-    GameStateView? Game);
+    GameStateView? Game,
+    IReadOnlyList<WatcherView> Watchers,
+    IReadOnlyList<ChatLineView> Chat);
 
 public sealed record MatchMemberView(string Key, string Name, bool IsInitiator, bool IsLocal, InviteAnswer Answer);
+
+public sealed record WatcherView(string Key, string Name, bool IsLocal);
 
 /// <param name="ArmCount">Arms drawn on the board: one per player, never fewer than four.</param>
 public sealed record BoardLayoutView(
