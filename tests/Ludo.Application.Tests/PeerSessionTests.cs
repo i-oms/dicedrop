@@ -42,6 +42,7 @@ public sealed class PeerSessionTests
             await initiator.App.StartGame.ExecuteAsync();
             await WaitUntil(() => players.All(p => p.Latest.Match is { IsPlaying: true, Game: not null }), "not every player started");
             Assert.False(spectator.Latest.Match!.IsPlaying);
+            await spectator.App.WatchGame.ExecuteAsync(spectator.Latest.Match.Id);
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
             await Task.WhenAll(players.Select(p => p.PlayAsync(timeout.Token)));
@@ -96,6 +97,88 @@ public sealed class PeerSessionTests
         finally
         {
             await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task Moves_only_reach_those_with_the_board_open_and_others_catch_up_when_they_open_it()
+    {
+        var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var id = await StartPairAsync(peers[0], peers[1], peers);
+            var bystander = peers[2];
+            GameStateView BoardOf(TestPeer peer) => peer.Latest.Matches.Single(m => m.Id == id).Game!;
+
+            await RollForWhoeverIsNextAsync(peers[..2]);
+            await WaitUntil(() => BoardOf(peers[1]).RollCount == 1, "roll never completed");
+            await Task.Delay(200);
+            Assert.Equal(0, BoardOf(bystander).RollCount);
+
+            await bystander.App.WatchGame.ExecuteAsync(id);
+            await WaitUntil(() => BoardOf(bystander).RollCount == 1, "opening the board did not catch up");
+            await bystander.App.WatchGame.ExecuteAsync(null);
+
+            // With the board closed, the end of the game still arrives; its moves come on reopening.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            await Task.WhenAll(peers[..2].Select(p => p.PlayAsync(timeout.Token)));
+            await WaitUntil(() => bystander.Latest.Matches.Single(m => m.Id == id).Phase == MatchPhaseView.Finished, "bystander never heard the end");
+            await bystander.App.WatchGame.ExecuteAsync(id);
+            await WaitUntil(() => BoardOf(bystander).RollCount == BoardOf(peers[0]).RollCount, "reopening a finished board did not catch up");
+            Assert.Equal(Describe(BoardOf(peers[0])), Describe(BoardOf(bystander)));
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    private static async Task RollForWhoeverIsNextAsync(TestPeer[] players)
+    {
+        await WaitUntil(() => players.Any(p => p.Latest.Match?.Game?.IsLocalTurn == true), "nobody's turn");
+        await players.First(p => p.Latest.Match?.Game?.IsLocalTurn == true).App.RollDice.ExecuteAsync();
+    }
+
+    [Fact]
+    public async Task A_member_who_cant_reach_someone_only_blocks_games_with_that_person()
+    {
+        var unreachableNetwork = new TcpPeerNetwork();
+        var refusing = new FilteredNetwork(new TcpPeerNetwork());
+        var host = new TestPeer("Host");
+        var unreachable = new TestPeer("Unreachable", network: unreachableNetwork);
+        var other = new TestPeer("Other");
+        var refuser = new TestPeer("Refuser", network: refusing);
+        TestPeer[] linked = [host, unreachable, other];
+        try
+        {
+            var port = await FormLobbyAsync(linked);
+            refusing.Refuse(unreachableNetwork.ListenPort);
+            await refuser.App.JoinLobby.ExecuteAsync(refuser.Name, "127.0.0.1", port);
+            await WaitUntil(
+                () => unreachable.Latest.Members.Count == 4 && other.Latest.Members.All(m => m.IsReady) && host.Latest.Members.All(m => m.IsReady),
+                "the newcomer never linked to those it can reach");
+            Assert.False(unreachable.Latest.Members.Single(m => m.Name == "Refuser").IsReady);
+
+            // Both say yes to the host, but they can't check each other's commitment.
+            await host.App.ProposeGame.ExecuteAsync(GameCatalog.Ludo.Id, [unreachable.Latest.LocalKey, refuser.Latest.LocalKey]);
+            var blocked = host.Latest.Match!.Id;
+            await WaitUntil(() => unreachable.Latest.Matches.Any(m => m.Id == blocked) && refuser.Latest.Matches.Any(m => m.Id == blocked), "invite did not arrive");
+            await unreachable.App.AcceptInvite.ExecuteAsync(blocked);
+            await refuser.App.AcceptInvite.ExecuteAsync(blocked);
+            await WaitUntil(() => host.Latest.Match!.Invitees.All(i => i.Answer == InviteAnswer.Accepted), "answers never arrived");
+            await Task.Delay(300);
+            Assert.False(host.Latest.Match!.CanStart);
+            await Assert.ThrowsAsync<SessionException>(() => host.App.StartGame.ExecuteAsync());
+            await host.App.StopGame.ExecuteAsync();
+
+            // Everyone else plays on, even with a link missing elsewhere in the lobby.
+            await StartPairAsync(unreachable, other, linked);
+        }
+        finally
+        {
+            await refuser.App.DisposeAsync();
+            await DisposeAllAsync(linked);
         }
     }
 
@@ -161,6 +244,8 @@ public sealed class PeerSessionTests
             await FormLobbyAsync(peers);
             await StartGameAsync(initiator: peers[0], peers);
 
+            // The app announces the board it has open, and the leaver keeps it open.
+            await peers[1].App.WatchGame.ExecuteAsync(peers[1].Latest.Match!.Id);
             await peers[1].App.LeaveGame.ExecuteAsync();
 
             // Seats follow join order, which depends on whose greeting reached the host first.
@@ -251,9 +336,11 @@ public sealed class PeerSessionTests
 
             await latecomer.App.JoinLobby.ExecuteAsync(latecomer.Name, "127.0.0.1", port);
 
-            await WaitUntil(
-                () => latecomer.Latest.Match is { Phase: MatchPhaseView.Playing, Game.RollCount: >= 1 },
-                "latecomer never got the game");
+            await WaitUntil(() => latecomer.Latest.Match is { Phase: MatchPhaseView.Playing }, "latecomer never got the game");
+            await Task.Delay(200);
+            Assert.Equal(0, latecomer.Latest.Match!.Game!.RollCount);
+            await latecomer.App.WatchGame.ExecuteAsync(latecomer.Latest.Match.Id);
+            await WaitUntil(() => latecomer.Latest.Match is { Game.RollCount: >= 1 }, "opening the board did not catch up");
             Assert.False(latecomer.Latest.Match!.IsPlaying);
             Assert.False(latecomer.Latest.CanProposeGame);
         }
@@ -294,6 +381,7 @@ public sealed class PeerSessionTests
             Assert.All(peers, p => Assert.True(p.Latest.Match!.IsPlaying));
             Assert.False(latecomer.Latest.CanProposeGame);
 
+            await latecomer.App.WatchGame.ExecuteAsync(gameId);
             await peers[1].App.RollDice.ExecuteAsync();
             await WaitUntil(
                 () => peers.All(p => p.Latest.Match?.Game?.RollCount == 1)
@@ -410,11 +498,8 @@ public sealed class PeerSessionTests
                 () => peers.All(p => p.Latest.Matches.Count(m => m.Phase == MatchPhaseView.Finished) == 2),
                 "someone never saw both games end");
 
-            foreach (var id in new[] { first, second })
-            {
-                var results = peers.Select(p => Describe(p.Latest.Matches.Single(m => m.Id == id).Game!)).ToArray();
-                Assert.All(results, r => Assert.Equal(results[0], r));
-            }
+            await OpenBoardsAsync(peers, first, peers[1]);
+            await OpenBoardsAsync(peers, second, peers[3]);
 
             // Each game has its own board and record, whoever is looking.
             var firstLog = peers[0].Latest.Matches.Single(m => m.Id == first).Log;
@@ -496,12 +581,9 @@ public sealed class PeerSessionTests
                 () => peers.All(p => p.Latest.Matches.Count(m => m.Phase == MatchPhaseView.Finished) == 2),
                 "someone never saw both games end");
 
-            foreach (var id in new[] { first, second })
-            {
-                var results = peers.Select(p => Describe(p.Latest.Matches.Single(m => m.Id == id).Game!)).ToArray();
-                Assert.All(results, r => Assert.Equal(results[0], r));
-                Assert.Equal(4, peers[0].Latest.Matches.Single(m => m.Id == id).Game!.Seats.Count);
-            }
+            await OpenBoardsAsync(peers, first, peers[0]);
+            await OpenBoardsAsync(peers, second, peers[4]);
+            Assert.All(new[] { first, second }, id => Assert.Equal(4, peers[0].Latest.Matches.Single(m => m.Id == id).Game!.Seats.Count));
         }
         finally
         {
@@ -790,13 +872,19 @@ public sealed class PeerSessionTests
         var peers = Enumerable.Range(0, 3).Select(i => new TestPeer($"P{i}")).ToArray();
         try
         {
-            // An avatar set before joining goes out in the Hello; a later change is broadcast.
+            // An avatar set before joining is announced in the Hello, and its photo only comes when asked for.
             byte[] png = [0x89, 0x50, 0x4E, 0x47, 1, 2, 3];
             await peers[1].App.UpdateProfile.ExecuteAsync(5, png);
             await FormLobbyAsync(peers);
             await WaitUntil(
-                () => peers.All(p => p.Latest.Members.Single(m => m.Name == "P1").Profile is { Color: 5, Photo.Length: 7 }),
+                () => peers.All(p => p.Latest.Members.Single(m => m.Name == "P1").Profile is { Color: 5, PhotoId: not null }),
                 "avatar did not reach everyone");
+            Assert.Null(peers[0].Latest.Members.Single(m => m.Name == "P1").Profile.Photo);
+            await peers[0].App.FetchPhoto.ExecuteAsync(peers[1].Latest.LocalKey);
+            await peers[2].App.FetchPhoto.ExecuteAsync(peers[1].Latest.LocalKey);
+            await WaitUntil(
+                () => peers.All(p => p.Latest.Members.Single(m => m.Name == "P1").Profile.Photo?.Length == 7),
+                "photo did not reach those who asked");
             await peers[1].App.UpdateProfile.ExecuteAsync(2, null);
             await WaitUntil(
                 () => peers.All(p => p.Latest.Members.Single(m => m.Name == "P1").Profile is { Color: 2, Photo: null }),
@@ -1120,6 +1208,19 @@ public sealed class PeerSessionTests
         }
     }
 
+    /// <summary>Everyone opens this game's board, which must then match what one of its players has.</summary>
+    private static async Task OpenBoardsAsync(TestPeer[] peers, Guid id, TestPeer player)
+    {
+        string BoardOf(TestPeer peer) => Describe(peer.Latest.Matches.Single(m => m.Id == id).Game!);
+
+        foreach (var peer in peers)
+        {
+            await peer.App.WatchGame.ExecuteAsync(id);
+        }
+
+        await WaitUntil(() => peers.All(p => BoardOf(p) == BoardOf(player)), "an opened board did not match the players'");
+    }
+
     private static string Describe(GameStateView game) => string.Join(
         " / ",
         game.Seats.Select(s => $"{s.Name}:{s.Standing}:{s.Rank}:" +
@@ -1230,6 +1331,7 @@ public sealed class PeerSessionTests
 
         private readonly HashSet<Ludo.Domain.Players.PlayerId> _muted = [];
         private readonly List<TimeSpan> _rosterSentAt = [];
+        private volatile int _refusedPort;
         private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
 
         /// <summary>When each roster went out, oldest first.</summary>
@@ -1288,7 +1390,12 @@ public sealed class PeerSessionTests
             inner.StartAsync(localId, port, cancellationToken);
 
         public Task<Ludo.Domain.Players.PlayerId> ConnectAsync(string host, int port, CancellationToken cancellationToken = default) =>
-            inner.ConnectAsync(host, port, cancellationToken);
+            port == _refusedPort
+                ? Task.FromException<Ludo.Domain.Players.PlayerId>(new TimeoutException("No answer from the host."))
+                : inner.ConnectAsync(host, port, cancellationToken);
+
+        /// <summary>Makes this port unreachable from here, as a firewall would.</summary>
+        public void Refuse(int port) => _refusedPort = port;
 
         public void Send(Ludo.Domain.Players.PlayerId peer, PeerMessage message) => inner.Send(peer, message);
 

@@ -15,7 +15,7 @@ public static class SessionLimits
 
     public const int MaxPollOptionLength = 30;
 
-    /// <summary>Avatar photos travel to every peer in the Hello, so they stay small.</summary>
+    /// <summary>Everyone who sees an avatar fetches its photo, so they stay small.</summary>
     public const int MaxPhotoBytes = 64 * 1024;
 
     /// <summary>Colours in the shared avatar palette.</summary>

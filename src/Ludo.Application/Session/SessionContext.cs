@@ -28,10 +28,15 @@ internal sealed class SessionContext(
     private const int MaxDirectEntries = 200;
     private const int MaxPolls = 50;
     private const int MaxEndedMatches = 4;
+    private const int MaxCachedPhotos = 200;
+    private const int MaxPhotoIdLength = 128;
 
     private readonly List<string> _log = [];
     private readonly List<ChatLineView> _chat = [];
     private readonly Dictionary<PlayerId, List<ChatLineView>> _direct = [];
+
+    // Kept across sessions, so moving to another lobby doesn't fetch the same faces again.
+    private readonly Dictionary<string, byte[]> _photos = [];
 
     public IPeerNetwork Network { get; } = network;
 
@@ -190,6 +195,32 @@ internal sealed class SessionContext(
         return profile;
     }
 
+    /// <summary>What a peer's Hello or profile update tells us, with any photo bytes dropped: those are fetched by id.</summary>
+    public static PlayerProfile? ProfileFromPeer(PlayerProfile? profile) =>
+        ValidateProfile(profile) is { } valid
+            ? valid with { Photo = null, PhotoId = valid.PhotoId is { Length: <= MaxPhotoIdLength } ? valid.PhotoId : null }
+            : null;
+
+    public bool HasPhoto(string id) => _photos.ContainsKey(id);
+
+    /// <summary>Keeps a fetched photo, if it really is the one with this id.</summary>
+    public void CachePhoto(string id, byte[] photo)
+    {
+        if (ValidateProfile(new PlayerProfile(0, photo))?.Photo is null || PhotoIdOf(photo) != id)
+        {
+            return;
+        }
+
+        if (_photos.Count >= MaxCachedPhotos)
+        {
+            _photos.Clear();
+        }
+
+        _photos[id] = photo;
+    }
+
+    public string PhotoIdOf(byte[] photo) => Convert.ToHexString(Crypto.Hash(photo));
+
     public void AddChat(PlayerId sender, string text, bool isLocal)
     {
         var line = new ChatLineView(KeyOf(sender), NameOf(sender), text, isLocal, Time.GetLocalNow(), ChatLineKind.Message, Conversation: null);
@@ -244,7 +275,8 @@ internal sealed class SessionContext(
     /// <summary>Our avatar, or the one a peer sent us; peers we have no profile for get a colour from their id.</summary>
     public PlayerProfile ProfileOf(PlayerId id) =>
         id == LocalId ? LocalProfile
-        : Peers.TryGetValue(id, out var peer) && peer.Profile is { } profile ? profile
+        : Peers.TryGetValue(id, out var peer) && peer.Profile is { } profile
+            ? profile with { Photo = profile.PhotoId is { } photoId ? _photos.GetValueOrDefault(photoId) : null }
         : new PlayerProfile((int)((uint)id.Value.GetHashCode() % SessionLimits.AvatarColors), null);
 
     private static bool IsPngOrJpeg(byte[] data) =>
@@ -297,13 +329,18 @@ internal sealed class SessionContext(
                 match.Phase = MatchPhase.Finished;
                 match.Chain = null;
                 PastMatches.Add(match.Id);
+                if (match.Initiator == LocalId)
+                {
+                    SendToBystanders(match, new MatchStatusMessage(match.Id, Left: null, Finished: true));
+                }
             }
         }
     }
 
     /// <summary>
-    /// Notes a change just applied to the board. The initiator forwards it to everyone not playing,
-    /// which is how spectators follow the game without taking part in the dice protocol.
+    /// Notes a change just applied to the board. The initiator forwards it to those with the board open but
+    /// not playing, which is how spectators follow the game without taking part in the dice protocol.
+    /// Everyone else only hears who left and when it ends, and fetches the moves if they open the board.
     /// </summary>
     public void RecordStep(MatchState match, MatchStep step)
     {
@@ -314,9 +351,22 @@ internal sealed class SessionContext(
         }
 
         var message = new MatchStepMessage(match.Id, match.History.Count - 1, step);
-        foreach (var watcher in Peers.Values.Where(p => p.IsGreeted && !match.IsActivePlayer(p.Id)))
+        foreach (var watcher in Peers.Values.Where(p => p.IsGreeted && !match.IsActivePlayer(p.Id) && match.Viewers.Contains(p.Id)))
         {
             Network.Send(watcher.Id, message);
+        }
+
+        if (step.Kind == MatchStepKind.Remove)
+        {
+            SendToBystanders(match, new MatchStatusMessage(match.Id, step.Player, Finished: false));
+        }
+    }
+
+    private void SendToBystanders(MatchState match, PeerMessage message)
+    {
+        foreach (var bystander in Peers.Values.Where(p => p.IsGreeted && !match.IsActivePlayer(p.Id) && !match.Viewers.Contains(p.Id)))
+        {
+            Network.Send(bystander.Id, message);
         }
     }
 
@@ -329,6 +379,17 @@ internal sealed class SessionContext(
                     && Peers.TryGetValue(r.Id, out var peer) && peer.IsGreeted)
                 .ToList()
             : [];
+
+    /// <summary>
+    /// Whether each player who would get a seat holds every other's yes. Without that a player can't check the
+    /// seating and would drop out at the start. Others in the lobby don't matter: they aren't in this game.
+    /// </summary>
+    public bool ArePlayersLinked(MatchState match, List<RosterSeat> players)
+    {
+        var seated = players.Take(MaxGamePlayers - 1).Select(p => p.Id).ToArray();
+        return seated.All(player => match.Links.TryGetValue(player, out var heard)
+            && seated.All(other => other == player || heard.Contains(other)));
+    }
 
     /// <summary>Sends to every other player still in the match.</summary>
     public void SendToPlayers(MatchState match, PeerMessage message)

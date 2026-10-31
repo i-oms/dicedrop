@@ -5,7 +5,7 @@ namespace Ludo.Application.Protocol;
 
 public static class ProtocolInfo
 {
-    public const int Version = 10;
+    public const int Version = 12;
 
     /// <summary>
     /// Port a host listens on when it can. Peers never depend on it: if it is taken, the host falls back
@@ -24,9 +24,6 @@ public sealed record JoinRejectedMessage(string Reason) : PeerMessage;
 
 /// <summary>Host to newcomer: the other lobby members it should connect to.</summary>
 public sealed record PeerDirectoryMessage(IReadOnlyList<PeerAddress> Peers) : PeerMessage;
-
-/// <summary>Member to host: which peers I have a greeted link with, so the host knows when the mesh is complete.</summary>
-public sealed record PeerStatusMessage(IReadOnlyList<PlayerId> ConnectedPeers) : PeerMessage;
 
 /// <summary>Host to everyone: lobby members in join order.</summary>
 public sealed record LobbyStateMessage(IReadOnlyList<RosterEntry> Roster) : PeerMessage;
@@ -58,6 +55,15 @@ public sealed record PollRetractMessage(Guid PollId) : PeerMessage;
 /// <summary>Lobby member to everyone: my avatar changed. The first one travels in the Hello.</summary>
 public sealed record ProfileMessage(PlayerProfile Profile) : PeerMessage;
 
+/// <summary>Lobby member to another: send me this photo, now that your avatar is on my screen.</summary>
+public sealed record PhotoRequestMessage(string PhotoId) : PeerMessage;
+
+/// <summary>Answer to <see cref="PhotoRequestMessage"/>.</summary>
+public sealed record PhotoMessage(string PhotoId, byte[] Photo) : PeerMessage;
+
+/// <summary>Initiator to members not watching: the little they need to know about a game without following its moves.</summary>
+public sealed record MatchStatusMessage(Guid MatchId, PlayerId? Left, bool Finished) : PeerMessage;
+
 /// <summary>
 /// Any lobby member to everyone: "who wants to play?". The sender becomes the match's initiator and
 /// commits to its dice chain up front. Only <see cref="Invitees"/> may join; null invites everyone.
@@ -67,6 +73,9 @@ public sealed record MatchProposalMessage(Guid MatchId, byte[] ChainAnchor, stri
 
 /// <summary>Invited member to everyone: in or out. Players who accept commit to a fresh dice chain.</summary>
 public sealed record MatchReplyMessage(Guid MatchId, bool Accepted, byte[]? ChainAnchor) : PeerMessage;
+
+/// <summary>Player who said yes to the initiator: whose yes I hold, so the game only starts once every player can reach every other.</summary>
+public sealed record MatchLinksMessage(Guid MatchId, IReadOnlyList<PlayerId> Heard) : PeerMessage;
 
 /// <summary>Initiator to everyone: seats, rules and every seat's dice commitment, frozen for the whole match.</summary>
 public sealed record GameStartMessage(Guid MatchId, GameRules Rules, IReadOnlyList<SeatAssignment> Seats) : PeerMessage;
@@ -118,11 +127,13 @@ public sealed record CloseAppMessage : PeerMessage;
 
 /// <param name="Color">Index into the shared avatar palette, used behind initials when there is no photo.</param>
 /// <param name="Photo">A small square PNG or JPEG, or null.</param>
-public sealed record PlayerProfile(int Color, byte[]? Photo);
+/// <param name="Photo">Never sent with the profile: it is fetched by <paramref name="PhotoId"/> when needed.</param>
+/// <param name="PhotoId">Hash of the photo; null when there is none.</param>
+public sealed record PlayerProfile(int Color, byte[]? Photo, string? PhotoId = null);
 
 public sealed record PeerAddress(PlayerId Id, string Host, int Port);
 
-public sealed record RosterEntry(PlayerId Id, string Name, bool Ready);
+public sealed record RosterEntry(PlayerId Id, string Name);
 
 public sealed record SeatAssignment(PlayerId Id, string Name, byte[] ChainAnchor);
 

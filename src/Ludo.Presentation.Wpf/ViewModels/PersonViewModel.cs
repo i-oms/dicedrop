@@ -9,8 +9,11 @@ namespace Ludo.Presentation.Wpf.ViewModels;
 /// Someone in the lobby (or who was in it), kept as one object per member so avatars, names and
 /// presence update everywhere they are shown, including on chat lines sent earlier.
 /// </summary>
-public sealed class PersonViewModel(string key) : ObservableObject
+public sealed class PersonViewModel(string key, Action<string>? fetchPhoto = null) : ObservableObject
 {
+    private bool _isOnScreen;
+    private string? _missingPhoto;
+    private string? _fetchedPhoto;
     private string _name = string.Empty;
     private string _initials = "?";
     private Brush _color = SeatPalette.Brush(0);
@@ -69,6 +72,9 @@ public sealed class PersonViewModel(string key) : ObservableObject
             if (SetProperty(ref _isPresent, value))
             {
                 OnPropertyChanged(nameof(Status));
+
+                // A new link starts from scratch, so anything still on its way won't come.
+                _fetchedPhoto = null;
             }
         }
     }
@@ -118,7 +124,25 @@ public sealed class PersonViewModel(string key) : ObservableObject
         IsHost = member.IsHost;
         IsPresent = true;
         ApplyProfile(member.Profile.Color, member.Profile.Photo);
+        _missingPhoto = member.Profile.Photo is null ? member.Profile.PhotoId : null;
+        FetchPhotoIfNeeded();
         OnPropertyChanged(nameof(Status));
+    }
+
+    /// <summary>Called when an avatar starts drawing this person: only then is their photo worth fetching.</summary>
+    internal void MarkOnScreen()
+    {
+        _isOnScreen = true;
+        FetchPhotoIfNeeded();
+    }
+
+    private void FetchPhotoIfNeeded()
+    {
+        if (_isOnScreen && _missingPhoto is { } photo && photo != _fetchedPhoto)
+        {
+            _fetchedPhoto = photo;
+            fetchPhoto?.Invoke(Key);
+        }
     }
 
     /// <summary>For people we only know from old chat lines.</summary>

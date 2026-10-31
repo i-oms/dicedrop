@@ -272,12 +272,14 @@ public sealed class LobbyViewModel : ObservableObject
     {
         if (!_people.TryGetValue(key, out var person))
         {
-            _people[key] = person = new PersonViewModel(key);
+            _people[key] = person = new PersonViewModel(key, FetchPhoto);
             person.UpdateName(name);
         }
 
         return person;
     }
+
+    private void FetchPhoto(string key) => _ = _app.FetchPhoto.ExecuteAsync(key);
 
     private ConversationViewModel ConversationWith(PersonViewModel person)
     {

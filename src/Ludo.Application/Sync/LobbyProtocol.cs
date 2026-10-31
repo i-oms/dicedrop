@@ -12,17 +12,12 @@ namespace Ludo.Application.Sync;
 /// </summary>
 internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matches, SessionExecutor executor)
 {
-    /// <summary>
-    /// One join makes every member report its links, and each report used to send the whole roster to
-    /// everyone, so these two go out at most this often.
-    /// </summary>
+    /// <summary>The whole roster goes to everyone, so people arriving together share one update.</summary>
     private static readonly TimeSpan RosterInterval = TimeSpan.FromMilliseconds(250);
 
     private DateTimeOffset? _lastCloseOut;
 
     private ExecutorThrottle RosterThrottle => field ??= new(executor, context.Time, RosterInterval, SendRoster);
-
-    private ExecutorThrottle ConnectivityThrottle => field ??= new(executor, context.Time, RosterInterval, SendConnectivity);
 
     public void OnPeerConnected(PeerConnection connection)
     {
@@ -35,7 +30,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         context.Peers[connection.Peer] = new PeerInfo(connection.Peer, connection.Host, connection.ListenPort);
         context.Network.Send(
             connection.Peer,
-            new HelloMessage(ProtocolInfo.Version, context.LocalName, context.LocalProfile));
+            new HelloMessage(ProtocolInfo.Version, context.LocalName, context.LocalProfile with { Photo = null }));
     }
 
     public DispatchResult OnHello(PlayerId from, HelloMessage hello)
@@ -71,12 +66,11 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         }
 
         peer.Name = name;
-        peer.Profile = SessionContext.ValidateProfile(hello.Profile);
+        peer.Profile = SessionContext.ProfileFromPeer(hello.Profile);
         matches.OnMemberGreeted(from);
 
         if (!context.IsHost)
         {
-            ReportConnectivity();
             return DispatchResult.Handled;
         }
 
@@ -113,20 +107,6 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         return DispatchResult.Handled;
     }
 
-    public DispatchResult OnPeerStatus(PlayerId from, PeerStatusMessage status)
-    {
-        if (context.Stage != SessionStage.Lobby || !context.IsHost
-            || context.Roster.Find(r => r.Id == from) is not { } seat)
-        {
-            return DispatchResult.Ignored;
-        }
-
-        seat.ConnectedTo.Clear();
-        seat.ConnectedTo.UnionWith(status.ConnectedPeers);
-        BroadcastRoster();
-        return DispatchResult.Handled;
-    }
-
     public DispatchResult OnLobbyState(PlayerId from, LobbyStateMessage state)
     {
         if (context.Stage != SessionStage.Lobby || from != context.HostId)
@@ -137,7 +117,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         context.Roster.Clear();
         foreach (var entry in state.Roster.Take(SessionContext.MaxLobbyMembers))
         {
-            context.Roster.Add(new RosterSeat(entry.Id, entry.Name) { Ready = entry.Ready });
+            context.Roster.Add(new RosterSeat(entry.Id, entry.Name));
         }
 
         return DispatchResult.Handled;
@@ -305,17 +285,53 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             throw new Common.SessionException($"Avatar photos must be PNG or JPEG and at most {SessionLimits.MaxPhotoBytes / 1024} KB.");
         }
 
-        context.LocalProfile = valid;
+        context.LocalProfile = valid with { PhotoId = valid.Photo is { } photo ? context.PhotoIdOf(photo) : null };
         if (context.Stage == SessionStage.Lobby)
         {
-            context.Network.Broadcast(new ProfileMessage(context.LocalProfile));
+            context.Network.Broadcast(new ProfileMessage(context.LocalProfile with { Photo = null }));
         }
+    }
+
+    /// <summary>Asks for someone's photo, unless we have it or already asked. It only matters once it's on screen.</summary>
+    public void FetchPhotoLocal(string key)
+    {
+        if (context.Stage == SessionStage.Lobby
+            && SessionContext.FindByKey(key) is { } id && context.Peers.TryGetValue(id, out var peer)
+            && peer.Profile?.PhotoId is { } photo && !context.HasPhoto(photo) && peer.RequestedPhoto != photo)
+        {
+            peer.RequestedPhoto = photo;
+            context.Network.Send(id, new PhotoRequestMessage(photo));
+        }
+    }
+
+    public DispatchResult OnPhotoRequest(PlayerId from, PhotoRequestMessage request)
+    {
+        if (context.Stage != SessionStage.Lobby || !context.Peers.TryGetValue(from, out var peer) || !peer.IsGreeted
+            || context.LocalProfile is not { Photo: { } photo } || context.LocalProfile.PhotoId != request.PhotoId)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        context.Network.Send(from, new PhotoMessage(request.PhotoId, photo));
+        return DispatchResult.Handled;
+    }
+
+    public DispatchResult OnPhoto(PlayerId from, PhotoMessage message)
+    {
+        if (context.Stage != SessionStage.Lobby || !context.Peers.TryGetValue(from, out var peer) || peer.RequestedPhoto != message.PhotoId)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        peer.RequestedPhoto = null;
+        context.CachePhoto(message.PhotoId, message.Photo);
+        return DispatchResult.Handled;
     }
 
     public DispatchResult OnProfile(PlayerId from, ProfileMessage message)
     {
         if (context.Stage != SessionStage.Lobby || !context.Peers.TryGetValue(from, out var peer) || !peer.IsGreeted
-            || SessionContext.ValidateProfile(message.Profile) is not { } profile)
+            || SessionContext.ProfileFromPeer(message.Profile) is not { } profile)
         {
             return DispatchResult.Ignored;
         }
@@ -372,16 +388,12 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
 
             BroadcastRoster();
         }
-        else
-        {
-            ReportConnectivity();
-        }
     }
 
     /// <summary>Host side: asks for the roster to go out, now or as soon as <see cref="RosterInterval"/> allows.</summary>
     public void BroadcastRoster() => RosterThrottle.Request();
 
-    /// <summary>Recomputes who is fully meshed, then shares the roster and refreshes the LAN beacon.</summary>
+    /// <summary>Shares the roster and refreshes the LAN beacon.</summary>
     private void SendRoster()
     {
         if (context.Stage != SessionStage.Lobby || !context.IsHost)
@@ -389,18 +401,8 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             return;
         }
 
-        var memberIds = context.Roster.Select(r => r.Id).ToArray();
-        var hostLinks = context.Peers.Values.Where(p => p.IsGreeted).Select(p => p.Id).ToHashSet();
-        foreach (var seat in context.Roster)
-        {
-            var isLocal = seat.Id == context.LocalId;
-            HashSet<PlayerId> links = isLocal ? hostLinks : [.. seat.ConnectedTo, context.LocalId];
-            var meshed = memberIds.All(id => id == seat.Id || links.Contains(id));
-            seat.Ready = meshed && (isLocal || hostLinks.Contains(seat.Id));
-        }
-
         context.Network.Broadcast(new LobbyStateMessage(
-            context.Roster.Select(r => new RosterEntry(r.Id, r.Name, r.Ready)).ToArray()));
+            context.Roster.Select(r => new RosterEntry(r.Id, r.Name)).ToArray()));
         context.Discovery.Advertise(new LobbyAdvertisement(
             context.LobbyId,
             context.LocalName,
@@ -408,9 +410,6 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             context.Roster.Count,
             SessionContext.MaxLobbyMembers,
             ProtocolInfo.Version));
-
-        // Readiness just changed, and this may be running after the message that asked for it was handled.
-        context.Publish();
     }
 
     /// <summary>
@@ -437,27 +436,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         context.AddLog($"{oldHost?.Name ?? "The host"} left the lobby. {(context.IsHost ? "You are" : $"{successor.Name} is")} the host now.");
         if (context.IsHost)
         {
-            foreach (var member in context.Roster)
-            {
-                member.ConnectedTo.Clear();
-            }
-
             BroadcastRoster();
-        }
-        else
-        {
-            ReportConnectivity();
-        }
-    }
-
-    private void ReportConnectivity() => ConnectivityThrottle.Request();
-
-    private void SendConnectivity()
-    {
-        if (context.Stage == SessionStage.Lobby && context.HostId is { } host)
-        {
-            var linked = context.Peers.Values.Where(p => p.IsGreeted).Select(p => p.Id).ToArray();
-            context.Network.Send(host, new PeerStatusMessage(linked));
         }
     }
 

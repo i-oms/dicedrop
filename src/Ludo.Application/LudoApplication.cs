@@ -50,6 +50,7 @@ public sealed class LudoApplication : IAsyncDisposable
         SendDirectChat = new SendDirectChatUseCase(context, _executor, lobby);
         Nudge = new NudgeUseCase(context, _executor, lobby);
         UpdateProfile = new UpdateProfileUseCase(context, _executor, lobby);
+        FetchPhoto = new FetchPhotoUseCase(_executor, lobby);
         SendPoll = new SendPollUseCase(context, _executor, polls);
         VotePoll = new VotePollUseCase(context, _executor, polls);
         RetractPoll = new RetractPollUseCase(context, _executor, polls);
@@ -100,6 +101,8 @@ public sealed class LudoApplication : IAsyncDisposable
     public NudgeUseCase Nudge { get; }
 
     public UpdateProfileUseCase UpdateProfile { get; }
+
+    public FetchPhotoUseCase FetchPhoto { get; }
 
     /// <summary>Any lobby member: send chosen members a notification with answer buttons.</summary>
     public SendPollUseCase SendPoll { get; }

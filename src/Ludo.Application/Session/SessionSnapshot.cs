@@ -72,7 +72,8 @@ public sealed record MemberView(string Key, string Name, bool IsHost, bool IsLoc
 
 /// <param name="Color">Index into the avatar palette, 0 to <see cref="SessionLimits.AvatarColors"/> - 1.</param>
 /// <param name="Photo">PNG or JPEG bytes, unchecked beyond type and size: decode defensively.</param>
-public sealed record ProfileView(int Color, byte[]? Photo);
+/// <param name="PhotoId">Set when there is a photo; <paramref name="Photo"/> stays null until it has been fetched.</param>
+public sealed record ProfileView(int Color, byte[]? Photo, string? PhotoId = null);
 
 public enum ChatLineKind
 {

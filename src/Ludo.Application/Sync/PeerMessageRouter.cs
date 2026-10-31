@@ -13,6 +13,10 @@ internal sealed class PeerMessageRouter
 {
     private const int MaxDeferred = 256;
 
+    /// <summary>Building a snapshot walks the whole lobby, so busy traffic shares one. Local commands still publish at once.</summary>
+    private static readonly TimeSpan PublishInterval = TimeSpan.FromMilliseconds(50);
+
+    private readonly ExecutorThrottle _publish;
     private readonly SessionContext _context;
     private readonly SessionExecutor _executor;
     private readonly LobbyProtocol _lobby;
@@ -34,6 +38,7 @@ internal sealed class PeerMessageRouter
         _matches = matches;
         _gameplay = gameplay;
         _polls = polls;
+        _publish = new ExecutorThrottle(executor, context.Time, PublishInterval, context.Publish);
 
         context.Network.PeerConnected += (_, connection) => executor.Post(() => OnConnected(connection));
         context.Network.PeerDisconnected += (_, peer) => executor.Post(() => OnDisconnectedAsync(peer));
@@ -68,7 +73,7 @@ internal sealed class PeerMessageRouter
         }
 
         _lobby.OnPeerConnected(connection);
-        _context.Publish();
+        _publish.Request();
     }
 
     private async Task OnDisconnectedAsync(PlayerId peer)
@@ -84,7 +89,7 @@ internal sealed class PeerMessageRouter
         _polls.OnPeerGone(peer);
         await _lobby.OnPeerGoneAsync(peer).ConfigureAwait(false);
         await DrainDeferredAsync().ConfigureAwait(false);
-        _context.Publish();
+        _publish.Request();
     }
 
     private async Task OnMessageAsync(IncomingMessage incoming)
@@ -107,7 +112,7 @@ internal sealed class PeerMessageRouter
             await DrainDeferredAsync().ConfigureAwait(false);
         }
 
-        _context.Publish();
+        _publish.Request();
     }
 
     private async Task<DispatchResult> DispatchAsync(IncomingMessage incoming)
@@ -119,8 +124,6 @@ internal sealed class PeerMessageRouter
                 return _lobby.OnHello(from, hello);
             case PeerDirectoryMessage directory:
                 return _lobby.OnPeerDirectory(from, directory, ConnectInBackground);
-            case PeerStatusMessage status:
-                return _lobby.OnPeerStatus(from, status);
             case LobbyStateMessage state:
                 return _lobby.OnLobbyState(from, state);
             case RenameMessage rename:
@@ -141,6 +144,12 @@ internal sealed class PeerMessageRouter
                 return _polls.OnRetract(from, retract);
             case ProfileMessage profile:
                 return _lobby.OnProfile(from, profile);
+            case PhotoRequestMessage photoRequest:
+                return _lobby.OnPhotoRequest(from, photoRequest);
+            case PhotoMessage photo:
+                return _lobby.OnPhoto(from, photo);
+            case MatchStatusMessage status:
+                return _matches.OnStatus(from, status);
             case JoinRejectedMessage rejected:
                 return await _lobby.OnJoinRejectedAsync(from, rejected).ConfigureAwait(false);
             case LobbyClosedMessage:
@@ -149,6 +158,8 @@ internal sealed class PeerMessageRouter
                 return _matches.OnProposal(from, proposal);
             case MatchReplyMessage reply:
                 return _matches.OnReply(from, reply);
+            case MatchLinksMessage links:
+                return _matches.OnLinks(from, links);
             case GameStartMessage start:
                 return _matches.OnGameStart(from, start);
             case MatchLeaveMessage leave:
