@@ -256,6 +256,7 @@ public sealed class LobbyViewModel : ObservableObject
 
     internal void Clear()
     {
+        IsConfirmingClose = false;
         foreach (var person in _people.Values)
         {
             person.IsPresent = false;

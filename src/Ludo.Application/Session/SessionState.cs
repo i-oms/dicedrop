@@ -23,6 +23,9 @@ internal sealed class PeerInfo(PlayerId id, string host, int listenPort)
     /// <summary>When we last nudged this peer.</summary>
     public DateTimeOffset? LastNudgeOut { get; set; }
 
+    /// <summary>When this peer last closed our window; later requests inside the cooldown are dropped.</summary>
+    public DateTimeOffset? LastCloseIn { get; set; }
+
     /// <summary>True once the peer's Hello arrived, i.e. we know its name.</summary>
     public bool IsGreeted => Name is not null;
 }

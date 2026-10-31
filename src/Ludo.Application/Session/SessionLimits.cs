@@ -23,4 +23,7 @@ public static class SessionLimits
 
     /// <summary>How often one person may nudge the same person.</summary>
     public static readonly TimeSpan NudgeCooldown = TimeSpan.FromSeconds(10);
+
+    /// <summary>How often one person may close the window for everyone.</summary>
+    public static readonly TimeSpan CloseCooldown = TimeSpan.FromSeconds(10);
 }

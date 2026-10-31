@@ -12,6 +12,8 @@ namespace Ludo.Application.Sync;
 /// </summary>
 internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matches)
 {
+    private DateTimeOffset? _lastCloseOut;
+
     public void OnPeerConnected(PeerConnection connection)
     {
         if (context.Stage != SessionStage.Lobby)
@@ -253,6 +255,14 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
     public void CloseEveryoneLocal()
     {
         RequireLobby();
+        var now = context.Time.GetUtcNow();
+        if (_lastCloseOut is { } last && now - last < SessionLimits.CloseCooldown)
+        {
+            var wait = Math.Ceiling((SessionLimits.CloseCooldown - (now - last)).TotalSeconds);
+            throw new Common.SessionException($"You can close for everyone again in {wait} s.");
+        }
+
+        _lastCloseOut = now;
         context.Network.Broadcast(new CloseAppMessage());
     }
 
@@ -263,6 +273,14 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             return DispatchResult.Ignored;
         }
 
+        // A little slack under the sender's own cooldown, for clock and delivery jitter.
+        var now = context.Time.GetUtcNow();
+        if (peer.LastCloseIn is { } last && now - last < SessionLimits.CloseCooldown / 2)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        peer.LastCloseIn = now;
         context.AddLog($"{peer.Name} closed the window for everyone.");
         context.Presenter.PresentCloseRequest(peer.Name!);
         return DispatchResult.Handled;

@@ -812,6 +812,34 @@ public sealed class PeerSessionTests
                 () => peers[0].CloseRequests.SequenceEqual(["P1"]) && peers[2].CloseRequests.SequenceEqual(["P1"]),
                 "close request did not reach everyone");
             Assert.True(peers[1].CloseRequests.IsEmpty);
+
+            // The sender has to wait before doing it again.
+            await Assert.ThrowsAsync<SessionException>(() => peers[1].App.CloseEveryApp.ExecuteAsync());
+        }
+        finally
+        {
+            await DisposeAllAsync(peers);
+        }
+    }
+
+    [Fact]
+    public async Task Close_requests_repeated_inside_the_cooldown_are_dropped()
+    {
+        var networks = Enumerable.Range(0, 3).Select(_ => new FilteredNetwork(new TcpPeerNetwork())).ToArray();
+        var peers = networks.Select((n, i) => new TestPeer($"P{i}", network: n)).ToArray();
+        try
+        {
+            await FormLobbyAsync(peers);
+            var sender = SessionContext.FindByKey(peers[1].Latest.LocalKey)!.Value;
+            var other = SessionContext.FindByKey(peers[2].Latest.LocalKey)!.Value;
+
+            // The second peer's request shows when the first peer's repeats have been handled.
+            networks[0].Inject(sender, new CloseAppMessage());
+            networks[0].Inject(sender, new CloseAppMessage());
+            networks[0].Inject(other, new CloseAppMessage());
+
+            await WaitUntil(() => peers[0].CloseRequests.Contains("P2"), "close request was not handled");
+            Assert.Equal(["P1", "P2"], peers[0].CloseRequests);
         }
         finally
         {
