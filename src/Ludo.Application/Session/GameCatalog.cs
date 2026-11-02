@@ -11,7 +11,7 @@ public static class GameCatalog
         "Ludo",
         "The classic race home. Roll a six to come out, capture to send rivals back.",
         2,
-        SessionContext.MaxPlayers);
+        SessionContext.MaxGamePlayers);
 
     public static IReadOnlyList<GameInfo> All { get; } = [Ludo];
 

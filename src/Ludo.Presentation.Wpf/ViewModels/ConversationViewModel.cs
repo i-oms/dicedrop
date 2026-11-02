@@ -5,7 +5,7 @@ using Ludo.Application.Session;
 
 namespace Ludo.Presentation.Wpf.ViewModels;
 
-/// <summary>The lobby's group chat, or a private conversation with one person.</summary>
+/// <summary>The lobby's group chat, a game's group chat, or a private conversation with one person.</summary>
 public sealed class ConversationViewModel : ObservableObject
 {
     private readonly AsyncCommand _sendCommand;
@@ -16,9 +16,11 @@ public sealed class ConversationViewModel : ObservableObject
     private bool _isSelected;
 
     /// <param name="person">The other person, or null for the lobby chat.</param>
-    internal ConversationViewModel(PersonViewModel? person, LudoApplication app, Action<Exception> onError)
+    /// <param name="matchId">The game whose group chat this is; null for the lobby and private chats.</param>
+    internal ConversationViewModel(PersonViewModel? person, LudoApplication app, Action<Exception> onError, Guid? matchId = null)
     {
         Person = person;
+        MatchId = matchId;
         _sendCommand = new AsyncCommand(
             async _ =>
             {
@@ -26,7 +28,9 @@ public sealed class ConversationViewModel : ObservableObject
                 Draft = string.Empty;
                 try
                 {
-                    await (person is null ? app.SendChat.ExecuteAsync(text) : app.SendDirectChat.ExecuteAsync(person.Key, text));
+                    await (matchId is { } match ? app.SendMatchChat.ExecuteAsync(match, text)
+                        : person is null ? app.SendChat.ExecuteAsync(text)
+                        : app.SendDirectChat.ExecuteAsync(person.Key, text));
                 }
                 catch
                 {
@@ -57,10 +61,15 @@ public sealed class ConversationViewModel : ObservableObject
         }
     }
 
-    /// <summary>Null for the lobby chat.</summary>
+    /// <summary>Null for a group chat.</summary>
     public PersonViewModel? Person { get; }
 
+    internal Guid? MatchId { get; }
+
+    /// <summary>A group chat, drawn with the chat icon rather than an avatar: the lobby's or a game's.</summary>
     public bool IsLobby => Person is null;
+
+    public bool IsGameChat => MatchId is not null;
 
     public string Key => Person?.Key ?? string.Empty;
 
@@ -80,9 +89,9 @@ public sealed class ConversationViewModel : ObservableObject
 
     public int MaxChatLength => SessionLimits.MaxChatLength;
 
-    public string Placeholder => Person is null ? "Message the lobby…" : $"Message {Person.Name}…";
+    public string Placeholder => IsGameChat ? "Message this game…" : Person is null ? "Message the lobby…" : $"Message {Person.Name}…";
 
-    /// <summary>The lobby chat always; a private one while the other person is still in the lobby.</summary>
+    /// <summary>A group chat always; a private one while the other person is still in the lobby.</summary>
     public bool CanWrite => Person is not { IsPresent: false };
 
     /// <summary>New lines from others since the conversation was last open.</summary>

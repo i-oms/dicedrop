@@ -17,11 +17,17 @@ internal sealed class PeerInfo(PlayerId id, string host, int listenPort)
 
     public PlayerProfile? Profile { get; set; }
 
+    /// <summary>The photo we asked this peer for and are waiting on.</summary>
+    public string? RequestedPhoto { get; set; }
+
     /// <summary>When this peer last nudged us; later nudges inside the cooldown are dropped.</summary>
     public DateTimeOffset? LastNudgeIn { get; set; }
 
     /// <summary>When we last nudged this peer.</summary>
     public DateTimeOffset? LastNudgeOut { get; set; }
+
+    /// <summary>When this peer last closed our window; later requests inside the cooldown are dropped.</summary>
+    public DateTimeOffset? LastCloseIn { get; set; }
 
     /// <summary>True once the peer's Hello arrived, i.e. we know its name.</summary>
     public bool IsGreeted => Name is not null;
@@ -32,11 +38,6 @@ internal sealed class RosterSeat(PlayerId id, string name)
     public PlayerId Id { get; } = id;
 
     public string Name { get; set; } = name;
-
-    /// <summary>Host side only: the peers this member reported being connected to.</summary>
-    public HashSet<PlayerId> ConnectedTo { get; } = [];
-
-    public bool Ready { get; set; }
 }
 
 /// <summary>A notification we sent or received, with the answers heard so far.</summary>
@@ -111,8 +112,10 @@ internal sealed record MatchReply(bool Accepted, byte[]? Anchor);
 internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IReadOnlySet<PlayerId>? invitees)
 {
     private const int MaxLogEntries = 200;
+    private const int MaxChatEntries = 200;
 
     private readonly List<string> _log = [];
+    private readonly List<ChatLineView> _chat = [];
 
     public Guid Id { get; } = id;
 
@@ -129,6 +132,9 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
 
     /// <summary>Answers to the invite. The initiator is in from the start.</summary>
     public Dictionary<PlayerId, MatchReply> Replies { get; } = [];
+
+    /// <summary>Initiator side only: whose yes each accepting player reports holding.</summary>
+    public Dictionary<PlayerId, HashSet<PlayerId>> Links { get; } = [];
 
     /// <summary>Our dice commitment for this match, while we have said yes.</summary>
     public HashChain? Chain { get; set; }
@@ -147,11 +153,17 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
 
     public DiceRoundState Dice { get; } = new();
 
-    /// <summary>Every change applied to the board, in order; spectators are sent this.</summary>
+    /// <summary>Every change applied to the board, in order; those with the board open are sent this.</summary>
     public List<MatchStep> History { get; } = [];
 
     /// <summary>What happened in this game, oldest first, so a board never shows another game's moves.</summary>
     public IReadOnlyList<string> Log => _log;
+
+    /// <summary>This game's group chat, oldest first. Held in memory only, like the lobby's.</summary>
+    public IReadOnlyList<ChatLineView> Chat => _chat;
+
+    /// <summary>Everyone with this game's board open, us included. Those holding a seat are listed as players instead.</summary>
+    public HashSet<PlayerId> Viewers { get; } = [];
 
     public string? EndReason { get; set; }
 
@@ -164,6 +176,15 @@ internal sealed class MatchState(Guid id, PlayerId initiator, string gameId, IRe
         if (_log.Count > MaxLogEntries)
         {
             _log.RemoveRange(0, _log.Count - MaxLogEntries);
+        }
+    }
+
+    public void AddChat(ChatLineView line)
+    {
+        _chat.Add(line);
+        if (_chat.Count > MaxChatEntries)
+        {
+            _chat.RemoveRange(0, _chat.Count - MaxChatEntries);
         }
     }
 

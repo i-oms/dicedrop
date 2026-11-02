@@ -10,8 +10,15 @@ namespace Ludo.Application.Sync;
 /// are run by whoever starts them. If the host leaves, the longest-standing member takes over, so the
 /// lobby and any game in it carry on.
 /// </summary>
-internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matches)
+internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matches, SessionExecutor executor)
 {
+    /// <summary>The whole roster goes to everyone, so people arriving together share one update.</summary>
+    private static readonly TimeSpan RosterInterval = TimeSpan.FromMilliseconds(250);
+
+    private DateTimeOffset? _lastCloseOut;
+
+    private ExecutorThrottle RosterThrottle => field ??= new(executor, context.Time, RosterInterval, SendRoster);
+
     public void OnPeerConnected(PeerConnection connection)
     {
         if (context.Stage != SessionStage.Lobby)
@@ -23,7 +30,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         context.Peers[connection.Peer] = new PeerInfo(connection.Peer, connection.Host, connection.ListenPort);
         context.Network.Send(
             connection.Peer,
-            new HelloMessage(ProtocolInfo.Version, context.LocalName, context.LocalProfile));
+            new HelloMessage(ProtocolInfo.Version, context.LocalName, context.LocalProfile with { Photo = null }));
     }
 
     public DispatchResult OnHello(PlayerId from, HelloMessage hello)
@@ -53,18 +60,17 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             return Reject(from, "Invalid player name.");
         }
 
-        if (context.IsHost && context.Roster.Count >= SessionContext.MaxPlayers && !context.Roster.Exists(r => r.Id == from))
+        if (context.IsHost && context.Roster.Count >= SessionContext.MaxLobbyMembers && !context.Roster.Exists(r => r.Id == from))
         {
             return Reject(from, "The lobby is full.");
         }
 
         peer.Name = name;
-        peer.Profile = SessionContext.ValidateProfile(hello.Profile);
+        peer.Profile = SessionContext.ProfileFromPeer(hello.Profile);
         matches.OnMemberGreeted(from);
 
         if (!context.IsHost)
         {
-            ReportConnectivity();
             return DispatchResult.Handled;
         }
 
@@ -101,20 +107,6 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         return DispatchResult.Handled;
     }
 
-    public DispatchResult OnPeerStatus(PlayerId from, PeerStatusMessage status)
-    {
-        if (context.Stage != SessionStage.Lobby || !context.IsHost
-            || context.Roster.Find(r => r.Id == from) is not { } seat)
-        {
-            return DispatchResult.Ignored;
-        }
-
-        seat.ConnectedTo.Clear();
-        seat.ConnectedTo.UnionWith(status.ConnectedPeers);
-        BroadcastRoster();
-        return DispatchResult.Handled;
-    }
-
     public DispatchResult OnLobbyState(PlayerId from, LobbyStateMessage state)
     {
         if (context.Stage != SessionStage.Lobby || from != context.HostId)
@@ -123,9 +115,9 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         }
 
         context.Roster.Clear();
-        foreach (var entry in state.Roster.Take(SessionContext.MaxPlayers))
+        foreach (var entry in state.Roster.Take(SessionContext.MaxLobbyMembers))
         {
-            context.Roster.Add(new RosterSeat(entry.Id, entry.Name) { Ready = entry.Ready });
+            context.Roster.Add(new RosterSeat(entry.Id, entry.Name));
         }
 
         return DispatchResult.Handled;
@@ -253,6 +245,14 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
     public void CloseEveryoneLocal()
     {
         RequireLobby();
+        var now = context.Time.GetUtcNow();
+        if (_lastCloseOut is { } last && now - last < SessionLimits.CloseCooldown)
+        {
+            var wait = Math.Ceiling((SessionLimits.CloseCooldown - (now - last)).TotalSeconds);
+            throw new Common.SessionException($"You can close for everyone again in {wait} s.");
+        }
+
+        _lastCloseOut = now;
         context.Network.Broadcast(new CloseAppMessage());
     }
 
@@ -263,6 +263,14 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             return DispatchResult.Ignored;
         }
 
+        // A little slack under the sender's own cooldown, for clock and delivery jitter.
+        var now = context.Time.GetUtcNow();
+        if (peer.LastCloseIn is { } last && now - last < SessionLimits.CloseCooldown / 2)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        peer.LastCloseIn = now;
         context.AddLog($"{peer.Name} closed the window for everyone.");
         context.Presenter.PresentCloseRequest(peer.Name!);
         return DispatchResult.Handled;
@@ -277,17 +285,53 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
             throw new Common.SessionException($"Avatar photos must be PNG or JPEG and at most {SessionLimits.MaxPhotoBytes / 1024} KB.");
         }
 
-        context.LocalProfile = valid;
+        context.LocalProfile = valid with { PhotoId = valid.Photo is { } photo ? context.PhotoIdOf(photo) : null };
         if (context.Stage == SessionStage.Lobby)
         {
-            context.Network.Broadcast(new ProfileMessage(context.LocalProfile));
+            context.Network.Broadcast(new ProfileMessage(context.LocalProfile with { Photo = null }));
         }
+    }
+
+    /// <summary>Asks for someone's photo, unless we have it or already asked. It only matters once it's on screen.</summary>
+    public void FetchPhotoLocal(string key)
+    {
+        if (context.Stage == SessionStage.Lobby
+            && SessionContext.FindByKey(key) is { } id && context.Peers.TryGetValue(id, out var peer)
+            && peer.Profile?.PhotoId is { } photo && !context.HasPhoto(photo) && peer.RequestedPhoto != photo)
+        {
+            peer.RequestedPhoto = photo;
+            context.Network.Send(id, new PhotoRequestMessage(photo));
+        }
+    }
+
+    public DispatchResult OnPhotoRequest(PlayerId from, PhotoRequestMessage request)
+    {
+        if (context.Stage != SessionStage.Lobby || !context.Peers.TryGetValue(from, out var peer) || !peer.IsGreeted
+            || context.LocalProfile is not { Photo: { } photo } || context.LocalProfile.PhotoId != request.PhotoId)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        context.Network.Send(from, new PhotoMessage(request.PhotoId, photo));
+        return DispatchResult.Handled;
+    }
+
+    public DispatchResult OnPhoto(PlayerId from, PhotoMessage message)
+    {
+        if (context.Stage != SessionStage.Lobby || !context.Peers.TryGetValue(from, out var peer) || peer.RequestedPhoto != message.PhotoId)
+        {
+            return DispatchResult.Ignored;
+        }
+
+        peer.RequestedPhoto = null;
+        context.CachePhoto(message.PhotoId, message.Photo);
+        return DispatchResult.Handled;
     }
 
     public DispatchResult OnProfile(PlayerId from, ProfileMessage message)
     {
         if (context.Stage != SessionStage.Lobby || !context.Peers.TryGetValue(from, out var peer) || !peer.IsGreeted
-            || SessionContext.ValidateProfile(message.Profile) is not { } profile)
+            || SessionContext.ProfileFromPeer(message.Profile) is not { } profile)
         {
             return DispatchResult.Ignored;
         }
@@ -344,33 +388,27 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
 
             BroadcastRoster();
         }
-        else
-        {
-            ReportConnectivity();
-        }
     }
 
-    /// <summary>Host side: recomputes who is fully meshed, then shares the roster and refreshes the LAN beacon.</summary>
-    public void BroadcastRoster()
+    /// <summary>Host side: asks for the roster to go out, now or as soon as <see cref="RosterInterval"/> allows.</summary>
+    public void BroadcastRoster() => RosterThrottle.Request();
+
+    /// <summary>Shares the roster and refreshes the LAN beacon.</summary>
+    private void SendRoster()
     {
-        var memberIds = context.Roster.Select(r => r.Id).ToArray();
-        var hostLinks = context.Peers.Values.Where(p => p.IsGreeted).Select(p => p.Id).ToHashSet();
-        foreach (var seat in context.Roster)
+        if (context.Stage != SessionStage.Lobby || !context.IsHost)
         {
-            var isLocal = seat.Id == context.LocalId;
-            HashSet<PlayerId> links = isLocal ? hostLinks : [.. seat.ConnectedTo, context.LocalId];
-            var meshed = memberIds.All(id => id == seat.Id || links.Contains(id));
-            seat.Ready = meshed && (isLocal || hostLinks.Contains(seat.Id));
+            return;
         }
 
         context.Network.Broadcast(new LobbyStateMessage(
-            context.Roster.Select(r => new RosterEntry(r.Id, r.Name, r.Ready)).ToArray()));
+            context.Roster.Select(r => new RosterEntry(r.Id, r.Name)).ToArray()));
         context.Discovery.Advertise(new LobbyAdvertisement(
             context.LobbyId,
             context.LocalName,
             context.Network.ListenPort,
             context.Roster.Count,
-            SessionContext.MaxPlayers,
+            SessionContext.MaxLobbyMembers,
             ProtocolInfo.Version));
     }
 
@@ -398,25 +436,7 @@ internal sealed class LobbyProtocol(SessionContext context, MatchProtocol matche
         context.AddLog($"{oldHost?.Name ?? "The host"} left the lobby. {(context.IsHost ? "You are" : $"{successor.Name} is")} the host now.");
         if (context.IsHost)
         {
-            foreach (var member in context.Roster)
-            {
-                member.ConnectedTo.Clear();
-            }
-
             BroadcastRoster();
-        }
-        else
-        {
-            ReportConnectivity();
-        }
-    }
-
-    private void ReportConnectivity()
-    {
-        if (context.HostId is { } host)
-        {
-            var linked = context.Peers.Values.Where(p => p.IsGreeted).Select(p => p.Id).ToArray();
-            context.Network.Send(host, new PeerStatusMessage(linked));
         }
     }
 

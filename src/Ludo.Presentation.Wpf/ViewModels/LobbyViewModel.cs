@@ -256,6 +256,7 @@ public sealed class LobbyViewModel : ObservableObject
 
     internal void Clear()
     {
+        IsConfirmingClose = false;
         foreach (var person in _people.Values)
         {
             person.IsPresent = false;
@@ -265,18 +266,20 @@ public sealed class LobbyViewModel : ObservableObject
         MatchCards.Clear();
     }
 
-    private PersonViewModel SenderOf(ChatLineView line) => PersonOf(line.SenderKey, line.Sender);
+    internal PersonViewModel SenderOf(ChatLineView line) => PersonOf(line.SenderKey, line.Sender);
 
-    private PersonViewModel PersonOf(string key, string name)
+    internal PersonViewModel PersonOf(string key, string name)
     {
         if (!_people.TryGetValue(key, out var person))
         {
-            _people[key] = person = new PersonViewModel(key);
+            _people[key] = person = new PersonViewModel(key, FetchPhoto);
             person.UpdateName(name);
         }
 
         return person;
     }
+
+    private void FetchPhoto(string key) => _ = _app.FetchPhoto.ExecuteAsync(key);
 
     private ConversationViewModel ConversationWith(PersonViewModel person)
     {

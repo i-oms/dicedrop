@@ -27,7 +27,7 @@ public sealed class LudoApplication : IAsyncDisposable
         var context = new SessionContext(network, discovery, crypto, presenter, time, localId ?? PlayerId.New());
         var gameplay = new GameplayProtocol(context);
         var matches = new MatchProtocol(context, gameplay);
-        var lobby = new LobbyProtocol(context, matches);
+        var lobby = new LobbyProtocol(context, matches, _executor);
         var polls = new PollProtocol(context);
         var router = new PeerMessageRouter(context, _executor, lobby, matches, gameplay, polls);
 
@@ -45,9 +45,12 @@ public sealed class LudoApplication : IAsyncDisposable
         AutoLobby = new AutoLobbyUseCase(discovery, context, _executor, HostLobby, JoinLobby, time, diagnostics ?? NullDiagnosticLog.Instance);
         RenamePlayer = new RenamePlayerUseCase(context, _executor, lobby, AutoLobby);
         SendChat = new SendChatUseCase(context, _executor, lobby);
+        SendMatchChat = new SendMatchChatUseCase(context, _executor, matches);
+        WatchGame = new WatchGameUseCase(context, _executor, matches);
         SendDirectChat = new SendDirectChatUseCase(context, _executor, lobby);
         Nudge = new NudgeUseCase(context, _executor, lobby);
         UpdateProfile = new UpdateProfileUseCase(context, _executor, lobby);
+        FetchPhoto = new FetchPhotoUseCase(_executor, lobby);
         SendPoll = new SendPollUseCase(context, _executor, polls);
         VotePoll = new VotePollUseCase(context, _executor, polls);
         RetractPoll = new RetractPollUseCase(context, _executor, polls);
@@ -87,11 +90,19 @@ public sealed class LudoApplication : IAsyncDisposable
 
     public SendChatUseCase SendChat { get; }
 
+    /// <summary>Anyone with a board open: write to that game's players and watchers.</summary>
+    public SendMatchChatUseCase SendMatchChat { get; }
+
+    /// <summary>Says which game's board is on screen, if any.</summary>
+    public WatchGameUseCase WatchGame { get; }
+
     public SendDirectChatUseCase SendDirectChat { get; }
 
     public NudgeUseCase Nudge { get; }
 
     public UpdateProfileUseCase UpdateProfile { get; }
+
+    public FetchPhotoUseCase FetchPhoto { get; }
 
     /// <summary>Any lobby member: send chosen members a notification with answer buttons.</summary>
     public SendPollUseCase SendPoll { get; }

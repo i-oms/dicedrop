@@ -18,7 +18,7 @@ internal sealed class ChatToastController
     private readonly Func<string, PersonViewModel?> _personOf;
     private readonly Action<string> _openConversation;
     private ChatToastWindow? _toast;
-    private string _latestConversation = string.Empty;
+    private string? _latestConversation = string.Empty;
 
     public ChatToastController(
         Window mainWindow,
@@ -61,13 +61,14 @@ internal sealed class ChatToastController
         }
 
         var person = _personOf(line.SenderKey);
-        var where = line.Kind == ChatLineKind.Nudge ? "nudge" : line.Conversation is null ? "lobby" : "private";
+        var where = line.Kind == ChatLineKind.Nudge ? "nudge" : line.MatchId is not null ? "game" : line.Conversation is null ? "lobby" : "private";
         Show(
             new ToastLine(PersonViewModel.InitialsOf(line.Sender), person?.Color, person?.Photo, $"{line.Sender} · {where}", line.Text),
-            line.Conversation ?? string.Empty);
+            line.MatchId is not null ? null : line.Conversation ?? string.Empty);
     }
 
-    private void Show(ToastLine line, string conversation)
+    /// <param name="conversation">What a click opens; null just brings the window back, for a game's chat beside its board.</param>
+    private void Show(ToastLine line, string? conversation)
     {
         if (_mainWindow.IsActive || !_settings().ChatPopups)
         {
@@ -87,7 +88,11 @@ internal sealed class ChatToastController
     private void OpenLatest()
     {
         _toast?.Dismiss();
-        _openConversation(_latestConversation);
+        if (_latestConversation is not null)
+        {
+            _openConversation(_latestConversation);
+        }
+
         _mainWindow.BringToFront();
     }
 }

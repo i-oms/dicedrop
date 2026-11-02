@@ -48,13 +48,12 @@ public partial class App : System.Windows.Application
         var presenter = new WpfSessionPresenter(Dispatcher);
         var diagnostics = new WpfDiagnosticLog(Dispatcher);
         _discovery = new UdpLobbyDiscovery(diagnostics);
-        var loaded = UserSettings.Load();
-        if (loaded.PlayerId is null)
+        if (UserSettings.IsFirstRun)
         {
             StartupRegistration.EnableOnFirstRun();
         }
 
-        var settings = loaded.WithPlayerId();
+        var settings = UserSettings.Load().WithPlayerId();
         _app = new LudoApplication(
             new TcpPeerNetwork(diagnostics),
             _discovery,

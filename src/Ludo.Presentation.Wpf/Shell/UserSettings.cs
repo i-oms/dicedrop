@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Ludo.Presentation.Wpf.Shell;
 
@@ -29,6 +30,13 @@ internal sealed record UserSettings
     /// <summary>A random id, shown to the lobby, that keeps us the same person when we reconnect. Null until first run.</summary>
     public Guid? PlayerId { get; init; }
 
+    /// <summary>The file exists but could not be read, so these are stand-ins that must not replace it.</summary>
+    [JsonIgnore]
+    public bool IsReadFailed { get; init; }
+
+    /// <summary>True until the settings file has been written for the first time.</summary>
+    public static bool IsFirstRun => !File.Exists(FilePath);
+
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DiceDrop", "settings.json");
 
@@ -41,7 +49,11 @@ internal sealed record UserSettings
                 ? JsonSerializer.Deserialize<UserSettings>(File.ReadAllBytes(FilePath)) ?? new UserSettings()
                 : new UserSettings();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new UserSettings { IsReadFailed = true };
+        }
+        catch (JsonException)
         {
             return new UserSettings();
         }
@@ -70,6 +82,11 @@ internal sealed record UserSettings
     /// <exception cref="IOException">The file could not be written.</exception>
     public void Save()
     {
+        if (IsReadFailed)
+        {
+            throw new IOException("Your saved settings could not be read, so they were not overwritten. Restart DiceDrop and try again.");
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         var temp = FilePath + ".tmp";
         File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(this, new JsonSerializerOptions { WriteIndented = true }));

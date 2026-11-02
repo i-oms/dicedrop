@@ -63,6 +63,29 @@
                 </ItemsControl>
             </Border>
 
+            <!-- Who else has this board open. -->
+            <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" views:Motion.Enter="True"
+                    Visibility="{Binding HasWatchers, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Overline}" Text="{Binding WatchersTitle}" />
+                    <ItemsControl ItemsSource="{Binding Watchers}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,6,14,0">
+                                    <views:AvatarView Person="{Binding Person}" Size="20" Margin="0,0,6,0" />
+                                    <TextBlock Text="{Binding Name}" FontSize="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
             <Border DockPanel.Dock="Top" Style="{StaticResource Card}" BorderBrush="{StaticResource Accent}" Background="#2A2619"
                     Visibility="{Binding IsOver, Converter={StaticResource BoolToVisibility}}" views:Motion.Enter="True"
                     views:Motion.EnterOffset="-14">
@@ -83,7 +106,7 @@
                 <Button Content="Back to lobby" Margin="4" Command="{Binding BackCommand}" />
             </WrapPanel>
 
-            <!-- Lobby chat keeps going during the game; the latest moves sit above it. -->
+            <!-- The game's own group chat, for its players and watchers; the latest moves sit above it. -->
             <Border Style="{StaticResource Card}" Padding="14" views:Motion.Enter="True">
                 <DockPanel>
                     <Border DockPanel.Dock="Top" CornerRadius="10" Padding="10,6" Background="{StaticResource SurfaceSunken}">
@@ -99,7 +122,7 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </Border>
-                    <views:ChatPanel DataContext="{Binding Lobby.LobbyChat}" />
+                    <views:ChatPanel DataContext="{Binding Chat}" />
                 </DockPanel>
             </Border>
         </DockPanel>

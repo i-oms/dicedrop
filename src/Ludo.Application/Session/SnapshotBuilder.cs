@@ -19,7 +19,7 @@ internal static class SnapshotBuilder
                 r.Name,
                 r.Id == context.HostId,
                 r.Id == context.LocalId,
-                r.Ready,
+                r.Id == context.LocalId || (context.Peers.TryGetValue(r.Id, out var peer) && peer.IsGreeted),
                 context.IsInRunningGame(r.Id),
                 ToView(context.ProfileOf(r.Id))))
             .ToArray();
@@ -83,7 +83,7 @@ internal static class SnapshotBuilder
             .Select(r => new MatchMemberView(SessionContext.KeyOf(r.Id), r.Name, r.Id == match.Initiator, r.Id == context.LocalId, AnswerOf(match, r.Id)))
             .ToArray();
         var accepted = context.AcceptedPlayers(match);
-        var canStart = isInitiator && match.Phase == MatchPhase.Inviting && accepted.Count > 0 && accepted.TrueForAll(p => p.Ready);
+        var canStart = isInitiator && match.Phase == MatchPhase.Inviting && accepted.Count > 0 && context.ArePlayersLinked(match, accepted);
 
         return new MatchView(
             match.Id,
@@ -105,10 +105,15 @@ internal static class SnapshotBuilder
             canStart,
             match.EndReason,
             match.Log.ToArray(),
-            match.Game is { } game ? BuildGame(context, match, game) : null);
+            match.Game is { } game ? BuildGame(context, match, game) : null,
+            context.Roster
+                .Where(r => match.Viewers.Contains(r.Id) && !match.IsActivePlayer(r.Id))
+                .Select(r => new WatcherView(SessionContext.KeyOf(r.Id), r.Name, r.Id == context.LocalId))
+                .ToArray(),
+            match.Chat.ToArray());
     }
 
-    private static ProfileView ToView(Protocol.PlayerProfile profile) => new(profile.Color, profile.Photo);
+    private static ProfileView ToView(Protocol.PlayerProfile profile) => new(profile.Color, profile.Photo, profile.PhotoId);
 
     private static InviteAnswer AnswerOf(MatchState match, PlayerId id) =>
         match.Replies.TryGetValue(id, out var reply)

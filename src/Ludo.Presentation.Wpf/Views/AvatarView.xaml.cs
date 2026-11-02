@@ -106,6 +106,7 @@ public partial class AvatarView : UserControl
         // Weak: people outlive the many chat lines and lists that draw them.
         PropertyChangedEventManager.AddHandler(person, view.OnPersonPropertyChanged, string.Empty);
         view.UpdatePresence();
+        person.MarkOnScreen();
     }
 
     private void OnPersonPropertyChanged(object? sender, PropertyChangedEventArgs e) => UpdatePresence();

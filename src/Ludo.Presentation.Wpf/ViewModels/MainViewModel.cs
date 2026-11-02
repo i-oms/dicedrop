@@ -17,6 +17,7 @@ public sealed class MainViewModel : ObservableObject
     // Which board is on screen is a view concern: the session only says which games exist.
     private Guid? _viewing;
     private Guid? _autoOpened;
+    private Guid? _announcedViewing;
 
     internal MainViewModel(
         LudoApplication app,
@@ -108,6 +109,7 @@ public sealed class MainViewModel : ObservableObject
         if (snapshot.Stage == SessionStage.Idle)
         {
             _viewing = null;
+            AnnounceViewing();
             Game.Clear();
             Lobby.Clear();
             Searching.PlayerName = Settings.Saved.Name ?? Searching.PlayerName;
@@ -125,6 +127,7 @@ public sealed class MainViewModel : ObservableObject
 
         var viewed = snapshot.Matches.FirstOrDefault(m => m.Id == _viewing && m.Game is not null);
         _viewing = viewed?.Id;
+        AnnounceViewing();
 
         Lobby.Update(snapshot);
         Searching.PlayerName = snapshot.LocalName;
@@ -137,6 +140,16 @@ public sealed class MainViewModel : ObservableObject
 
         Game.Update(viewed);
         CurrentScreen = Game;
+    }
+
+    /// <summary>The session only says which games exist, so others learn who is watching from here.</summary>
+    private void AnnounceViewing()
+    {
+        if (_announcedViewing != _viewing)
+        {
+            _announcedViewing = _viewing;
+            _ = App.WatchGame.ExecuteAsync(_viewing);
+        }
     }
 
     /// <summary>Shows the lobby screen with a conversation open, e.g. after clicking a chat pop-up.</summary>
